@@ -18,7 +18,11 @@ if [ ! -f .env ]; then
 fi
 mkdir -p data backups
 chmod 700 data backups
-[ -f credentials.json ] && chmod 600 credentials.json || echo "Note: credentials.json (Google) is not here yet, see GOOGLE_DRIVE_SETUP.md Part A."
+if [ -f credentials.json ]; then
+  chmod 600 credentials.json || echo "Warning: cannot chmod credentials.json (owned by another user? run: sudo chown wayne:wayne credentials.json)"
+else
+  echo "Note: credentials.json (Google) is not here yet, see GOOGLE_DRIVE_SETUP.md Part A."
+fi
 
 echo
 echo "Setup complete in $(pwd)."
