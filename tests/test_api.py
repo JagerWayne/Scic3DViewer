@@ -270,6 +270,68 @@ def test_admin_panel(monkeypatch):
     assert c.get("/admin").status_code == 200                                          # static page; the API is what is protected
 
 
+def test_admin_edits_and_pauses_licenses():
+    adm = login(db.ADMIN_EMAIL)
+    c.post("/api/admin/licenses", headers=adm, json={"name": "Ed", "surname": "It", "email": "ed@x.com", "tier": "PRO", "duration": "30d"})
+    rows = lambda: c.get("/api/admin/licenses", headers=adm).json()
+    lic = lambda email, paid=True: next(x for x in rows() if x["email"] == email and bool(x["surname"]) == paid)
+    lid = lic("ed@x.com")["id"]
+    patch = lambda lid_=None, **b: c.patch(f"/api/admin/licenses/{lid_ or lid}", headers=adm, json=b)
+    assert patch(name="Edward", surname="Itt", note="vip", duration_days=90, tier="ENTERPRISE").status_code == 200
+    l = lic("ed@x.com")
+    assert (l["name"], l["surname"], l["note"], l["duration_days"], l["tier"], l["status"]) == ("Edward", "Itt", "vip", 90, "ENTERPRISE", "pending")
+    assert patch(expires_on="2030-01-31").status_code == 400                      # the clock has not started yet
+    h = login("ed@x.com")
+    assert tier(h) == "ENTERPRISE" and lic("ed@x.com")["status"] == "active"      # the first sign-in starts the clock
+    assert patch(duration_days=5).status_code == 400                              # now the expiry date is what counts
+    assert patch(expires_on="2030-01-31").status_code == 200
+    assert time.strftime("%Y-%m-%d", time.localtime(lic("ed@x.com")["expires_at"])) == "2030-01-31"
+    before = lic("ed@x.com")["expires_at"]
+    assert patch(paused=True).status_code == 200
+    assert lic("ed@x.com")["status"] == "paused" and tier(h) == "FREE" and tier(login("ed@x.com")) == "FREE"
+    with db.connect() as con:                                                     # pretend the pause started an hour ago
+        con.execute("UPDATE licenses SET paused_at=paused_at-3600 WHERE id=?", (lid,))
+    assert patch(paused=False).status_code == 200
+    after = lic("ed@x.com")
+    assert after["status"] == "active" and 3590 <= after["expires_at"] - before <= 3700 and tier(h) == "ENTERPRISE"  # the pause cost no time
+    assert patch(email="nope").status_code == 422
+    assert patch(email="Ed2@x.com").status_code == 200                            # moving a license to another Google account
+    assert tier(login("ed2@x.com")) == "ENTERPRISE" and tier(login("ed@x.com")) == "FREE"
+    free = lic("ed@x.com", paid=False)
+    assert patch(free["id"], name="Just a name", note="n").status_code == 200
+    assert patch(free["id"], tier="PRO").status_code == 400                       # free accounts are automatic
+    assert patch(99999, name="x").status_code == 404
+
+
+def test_admin_deletes_a_license_or_a_whole_person():
+    adm = login(db.ADMIN_EMAIL)
+    rows = lambda: c.get("/api/admin/licenses", headers=adm).json()
+    for email in ("keep@x.com", "gone@x.com"):
+        c.post("/api/admin/licenses", headers=adm, json={"name": "N", "surname": "S", "email": email, "tier": "PRO", "duration": "30d"})
+    paid = lambda email: next(x["id"] for x in rows() if x["email"] == email and x["surname"])
+    # delete only the license: the person keeps the account, the link and the Drive file
+    keep = login("keep@x.com"); sid = share(keep).json()["share_id"]
+    assert c.delete(f"/api/admin/licenses/{paid('keep@x.com')}", headers=adm).status_code == 200
+    assert not any(x["email"] == "keep@x.com" and x["surname"] for x in rows())
+    assert c.get("/api/me", headers=keep).status_code == 401                      # the session of the deleted license ended
+    again = login("keep@x.com")
+    assert tier(again) == "FREE" and [p["share_id"] for p in c.get("/api/projects", headers=again).json()] == [sid] and cloud
+    # delete the whole person: links, Drive files, sessions, licenses
+    gone = login("gone@x.com"); share(gone); share(gone); n_before = len(cloud)
+    assert c.delete(f"/api/admin/licenses/{paid('gone@x.com')}?purge=true", headers=adm).status_code == 200
+    assert len(cloud) == n_before - 2                                             # their two files left the Drive
+    assert c.get("/api/me", headers=gone).status_code == 401 and not any(x["email"] == "gone@x.com" for x in rows())
+    # a free account cannot be removed without the explicit purge
+    login("onlyfree@x.com")
+    free_id = next(x["id"] for x in rows() if x["email"] == "onlyfree@x.com")
+    assert c.delete(f"/api/admin/licenses/{free_id}", headers=adm).status_code == 400
+    assert c.delete(f"/api/admin/licenses/{free_id}?purge=true", headers=adm).status_code == 200
+    # the admin account is protected
+    admin_row = next(x for x in rows() if x["email"] == db.ADMIN_EMAIL)
+    assert c.delete(f"/api/admin/licenses/{admin_row['id']}?purge=true", headers=adm).status_code == 400
+    assert c.delete("/api/admin/licenses/99999", headers=adm).status_code == 404
+
+
 def test_mailer_needs_configuration(monkeypatch):
     monkeypatch.delenv("SMTP_HOST", raising=False)
     with pytest.raises(RuntimeError):

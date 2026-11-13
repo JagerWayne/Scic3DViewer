@@ -50,6 +50,10 @@ def init():
         CREATE TABLE IF NOT EXISTS activity(
           id INTEGER PRIMARY KEY, ts INTEGER, license_id INTEGER, action TEXT, ip TEXT, detail TEXT);
         """)
+        lhave = {r[1] for r in c.execute("PRAGMA table_info(licenses)")}
+        for col, typ in (("paused_at", "INTEGER"), ("note", "TEXT")):  # paused: access off, clock frozen; note: admin-only memo
+            if col not in lhave:
+                c.execute(f"ALTER TABLE licenses ADD COLUMN {col} {typ}")
         have = {r[1] for r in c.execute("PRAGMA table_info(shares)")}
         for col, typ in (("drive_ids", "TEXT"),            # JSON {"glbz": id, "hdr": id}  (legacy: "glb")
                          ("expires_at", "INTEGER"), ("revoked", "INTEGER DEFAULT 0"), ("pw_hash", "TEXT")):
@@ -59,6 +63,30 @@ def init():
 
 def h(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def delete_license(lid: int):
+    """Remove one paid license. The person keeps their account: shares and Drive login move to their Free license."""
+    with connect() as c:
+        r = c.execute("SELECT email FROM licenses WHERE id=? AND surname IS NOT NULL", (lid,)).fetchone()
+        if not r:
+            return False
+        free = c.execute("SELECT id FROM licenses WHERE email=? AND surname IS NULL", (r["email"],)).fetchone()
+        has_data = c.execute("SELECT (SELECT COUNT(*) FROM shares WHERE license_id=?) + (SELECT COUNT(*) FROM drive_tokens WHERE license_id=?)",
+                             (lid, lid)).fetchone()[0]
+        if free:
+            free = free["id"]
+        elif has_data:  # links or a Drive login exist: they move to a Free account instead of disappearing
+            c.execute("INSERT INTO licenses(key_hash,name,email,tier,created_at) VALUES(?,?,?,?,?)",
+                      (h(secrets.token_hex(16)), r["email"].split("@")[0], r["email"], "FREE", int(time.time())))
+            free = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+        if free:
+            c.execute("UPDATE shares SET license_id=? WHERE license_id=?", (free, lid))
+            c.execute("INSERT OR IGNORE INTO drive_tokens SELECT ?, token_enc, connected_at FROM drive_tokens WHERE license_id=?", (free, lid))
+        c.execute("DELETE FROM drive_tokens WHERE license_id=?", (lid,))
+        c.execute("DELETE FROM sessions WHERE license_id=?", (lid,))
+        c.execute("DELETE FROM licenses WHERE id=?", (lid,))
+    return True
 
 
 def license_ids(email: str) -> list:
@@ -103,7 +131,7 @@ def create_license(name, surname, email, tier, duration) -> str:
 
 
 def effective_tier(lic) -> str:
-    if lic["revoked"] or (lic["expires_at"] and lic["expires_at"] < time.time()):
+    if lic["revoked"] or lic["paused_at"] or (lic["expires_at"] and lic["expires_at"] < time.time()):
         return "FREE"
     return lic["tier"]
 
@@ -120,7 +148,7 @@ def login_google(name, email, ip):
     email, now = email.strip().lower(), int(time.time())
     name = (name or email.split("@")[0]).strip()[:80]
     with connect() as c:
-        lic = c.execute("SELECT * FROM licenses WHERE email=? AND revoked=0 AND surname IS NOT NULL "
+        lic = c.execute("SELECT * FROM licenses WHERE email=? AND revoked=0 AND paused_at IS NULL AND surname IS NOT NULL "
                         "AND (expires_at IS NULL OR expires_at>?) ORDER BY id DESC", (email, now)).fetchone()
         if lic and not lic["activated_at"]:  # duration starts counting at first activation
             c.execute("UPDATE licenses SET activated_at=?, expires_at=? WHERE id=?",
@@ -144,7 +172,7 @@ def login_google(name, email, ip):
 def session_user(token: str):
     """Return dict(name,email,license_id,tier,expires_at) or None."""
     with connect() as c:
-        r = c.execute("SELECT s.*, l.tier, l.revoked, l.expires_at FROM sessions s JOIN licenses l "
+        r = c.execute("SELECT s.*, l.tier, l.revoked, l.expires_at, l.paused_at FROM sessions s JOIN licenses l "
                       "ON l.id=s.license_id WHERE token_hash=?", (h(token),)).fetchone()
     if not r or r["created_at"] < time.time() - SESSION_TTL:
         return None

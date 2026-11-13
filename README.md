@@ -32,7 +32,7 @@ Sign in to `/studio` with the admin Google account (`waynescicluna.1985@gmail.co
 setting), then click **Admin** in the top bar or open `/admin`. The admin gets the Enterprise tier automatically. Tabs:
 
 * **Overview**: people, paid/pending/expiring licenses, links, views, connected drives, a 14-day activity chart, system status (Google, email, Stripe).
-* **Licenses**: search and filter; create a license (name, surname, Google email, tier, duration) and optionally email it; revoke or restore, change tier, extend by 30 days or 1 year, resend the email.
+* **Licenses**: search and filter; create a license (name, surname, Google email, tier, duration) and optionally email it. **Edit** opens a dialog for name, surname, email, tier, expiry date (or duration before the first sign-in), an admin note, quick buttons (+30 days, +1 year, Pause/Resume, Revoke/Restore, resend email) and a Danger zone. **Pause** gives the person the Free tier and freezes the clock (the paused time is added back on Resume); **Revoke** blocks for good. **Delete** removes the license only (the person keeps account and links); **Delete person and all data** also removes links (and the files in their Drive), Drive login, sessions and log, after typing the email. The admin account cannot be deleted.
 * **Shared links**: every link with owner, views and status; revoke, restore or delete (also deletes the file from the owner Drive).
 * **Activity**: searchable log of sign-ins, shares, views and admin actions.
 

@@ -1,5 +1,6 @@
 """Admin REST API behind the /admin page. Every route requires a session whose Google-verified email is db.ADMIN_EMAIL."""
 import time
+from datetime import datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -19,8 +20,15 @@ class NewLicense(BaseModel):
 
 
 class EditLicense(BaseModel):
-    revoked: bool | None = None
+    name: str | None = Field(None, min_length=1, max_length=80)
+    surname: str | None = Field(None, min_length=1, max_length=80)
+    email: str | None = Field(None, pattern=EMAIL_RE, max_length=320)
+    note: str | None = Field(None, max_length=500)                 # admin-only memo, "" clears it
     tier: str | None = None
+    revoked: bool | None = None                                    # permanent block
+    paused: bool | None = None                                     # temporary: Free access, the clock is frozen
+    expires_on: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")   # activated licenses
+    duration_days: int | None = Field(None, ge=1, le=36500)        # licenses waiting for the first sign-in
     extend_days: int | None = Field(None, ge=1, le=3650)
 
 
@@ -33,6 +41,8 @@ def status(r) -> str:
         return "free"
     if r["revoked"]:
         return "revoked"
+    if r["paused_at"]:
+        return "paused"
     if not r["activated_at"]:
         return "pending"
     return "expired" if r["expires_at"] < time.time() else "active"
@@ -75,7 +85,7 @@ def register(app, current_user, rate_limit, remove_share):
     @app.get("/api/admin/licenses")
     def licenses(u=Depends(admin)):
         with db.connect() as c:
-            rows = c.execute("SELECT l.id,l.name,l.surname,l.email,l.tier,l.duration_days,l.activated_at,l.expires_at,l.revoked,"
+            rows = c.execute("SELECT l.id,l.name,l.surname,l.email,l.tier,l.duration_days,l.activated_at,l.expires_at,l.revoked,l.paused_at,l.note,"
                              "l.created_at,(SELECT COUNT(*) FROM drive_tokens d WHERE d.license_id=l.id) drive,"
                              "(SELECT COUNT(*) FROM shares s WHERE s.license_id=l.id) shares FROM licenses l ORDER BY l.id DESC").fetchall()
         return [{**dict(r), "status": status(r)} for r in rows]
@@ -98,22 +108,81 @@ def register(app, current_user, rate_limit, remove_share):
 
     @app.patch("/api/admin/licenses/{lid}")
     def edit_license(lid: int, body: EditLicense, request: Request, u=Depends(admin)):
+        now, ch = int(time.time()), body.model_dump(exclude_none=True)
         with db.connect() as c:
-            r = c.execute("SELECT * FROM licenses WHERE id=? AND surname IS NOT NULL", (lid,)).fetchone()
+            r = c.execute("SELECT * FROM licenses WHERE id=?", (lid,)).fetchone()
             if not r:
-                raise HTTPException(404, "License not found (free accounts are managed automatically)")
-            if body.revoked is not None:
-                c.execute("UPDATE licenses SET revoked=? WHERE id=?", (int(body.revoked), lid))
-            if body.tier is not None:
-                if body.tier.upper() not in db.TIERS:
+                raise HTTPException(404, "License not found")
+            if r["surname"] is None and set(ch) - {"name", "note"}:
+                raise HTTPException(400, "Free accounts are automatic: only the name and the note can be edited")
+            sets = {}  # column names below are fixed strings, values are bound parameters
+            for k in ("name", "surname"):
+                if k in ch:
+                    sets[k] = ch[k].strip()
+            if "email" in ch:
+                sets["email"] = ch["email"].strip().lower()
+            if "note" in ch:
+                sets["note"] = ch["note"].strip() or None
+            if "revoked" in ch:
+                sets["revoked"] = int(ch["revoked"])
+            if "tier" in ch:
+                if ch["tier"].upper() not in db.TIERS:
                     raise HTTPException(400, "Unknown tier")
-                c.execute("UPDATE licenses SET tier=? WHERE id=?", (body.tier.upper(), lid))
-            if body.extend_days:
+                sets["tier"] = ch["tier"].upper()
+            if "expires_on" in ch:
+                if not r["activated_at"]:
+                    raise HTTPException(400, "Not activated yet: change the duration instead")
+                try:
+                    day = datetime.strptime(ch["expires_on"], "%Y-%m-%d")
+                except ValueError:
+                    raise HTTPException(400, "Date must look like 2027-01-31")
+                sets["expires_at"] = int((day + timedelta(days=1)).timestamp()) - 1  # the end of that day, server time
+            if "duration_days" in ch:
                 if r["activated_at"]:
-                    c.execute("UPDATE licenses SET expires_at=expires_at+? WHERE id=?", (body.extend_days * 86400, lid))
-                else:  # not yet activated: the clock has not started, lengthen the duration instead
-                    c.execute("UPDATE licenses SET duration_days=duration_days+? WHERE id=?", (body.extend_days, lid))
-        db.log(u["license_id"], "admin:edit", request.client.host, f"#{lid} {body.model_dump(exclude_none=True)}")
+                    raise HTTPException(400, "Already activated: change the expiry date instead")
+                sets["duration_days"] = ch["duration_days"]
+            if "extend_days" in ch:
+                if r["activated_at"]:
+                    sets["expires_at"] = sets.get("expires_at", r["expires_at"]) + ch["extend_days"] * 86400
+                else:  # the clock has not started yet, so lengthen the duration
+                    sets["duration_days"] = sets.get("duration_days", r["duration_days"]) + ch["extend_days"]
+            if "paused" in ch:
+                if ch["paused"] and not r["paused_at"]:
+                    sets["paused_at"] = now
+                elif not ch["paused"] and r["paused_at"]:
+                    sets["paused_at"] = None
+                    if r["activated_at"] and "expires_at" not in sets:  # a pause does not cost the customer any time
+                        sets["expires_at"] = r["expires_at"] + (now - r["paused_at"])
+            if sets:
+                c.execute(f"UPDATE licenses SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), lid))
+        db.log(u["license_id"], "admin:edit", request.client.host, f"#{lid} {sorted(ch)}")
+        return {"ok": True}
+
+    @app.delete("/api/admin/licenses/{lid}")
+    def delete_license(lid: int, request: Request, purge: bool = False, u=Depends(admin)):
+        with db.connect() as c:
+            r = c.execute("SELECT * FROM licenses WHERE id=?", (lid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "License not found")
+        if r["email"] == db.ADMIN_EMAIL:
+            raise HTTPException(400, "The admin account cannot be deleted")
+        if not purge:  # only the paid license goes; the person keeps their account and links (back to Free)
+            if r["surname"] is None:
+                raise HTTPException(400, "A free account holds the person's data: use Delete person")
+            db.delete_license(lid)
+        else:  # everything about this email: links (and their Drive files), Drive login, sessions, log, licenses
+            ids = db.license_ids(r["email"]); q = ",".join("?" * len(ids))
+            with db.connect() as c:
+                shares = c.execute(f"SELECT * FROM shares WHERE license_id IN ({q})", ids).fetchall()
+            for s in shares:
+                remove_share(s)
+            for i in ids:
+                storage.disconnect(i)
+            with db.connect() as c:
+                for table in ("sessions", "activity"):
+                    c.execute(f"DELETE FROM {table} WHERE license_id IN ({q})", ids)
+                c.execute(f"DELETE FROM licenses WHERE id IN ({q})", ids)
+        db.log(u["license_id"], "admin:delete_person" if purge else "admin:delete_license", request.client.host, r["email"])
         return {"ok": True}
 
     @app.post("/api/admin/licenses/{lid}/email")

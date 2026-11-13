@@ -51,18 +51,71 @@ function drawLicenses() {
   const rows = lics.filter(l => (!st || l.status === st) && (!q || `${l.name} ${l.surname || ''} ${l.email}`.toLowerCase().includes(q)));
   $('#lrows').replaceChildren(...rows.map(l => {
     const paid = l.surname !== null, reload = () => licenses().then(overview);
-    const tier = paid ? el('select', { className: 'inp', style: 'width:130px;padding:2px 6px', onchange: e => act(() => send('PATCH', '/licenses/' + l.id, { tier: e.target.value }).then(reload), 'Tier updated') },
-      ...['FREE', 'PRO', 'ENTERPRISE'].map(t => el('option', { value: t, textContent: t, selected: t === l.tier }))) : el('span', { textContent: l.tier });
-    const actions = paid ? [btn(l.revoked ? 'Restore' : 'Revoke', () => act(() => send('PATCH', '/licenses/' + l.id, { revoked: !l.revoked }).then(reload), l.revoked ? 'Restored' : 'Revoked')),
-      btn('+30d', () => act(() => send('PATCH', '/licenses/' + l.id, { extend_days: 30 }).then(reload), 'Extended by 30 days')),
-      btn('+1y', () => act(() => send('PATCH', '/licenses/' + l.id, { extend_days: 365 }).then(reload), 'Extended by 1 year')),
-      cfg.email ? btn('Email', () => act(() => send('POST', `/licenses/${l.id}/email`), 'Email sent')) : null] : [el('span', { className: 'text-xs text-slate-500', textContent: 'automatic' })];
-    return el('tr', {}, el('td', { textContent: [l.name, l.surname].filter(Boolean).join(' ') }), el('td', { textContent: l.email }), el('td', {}, tier), el('td', {}, pill(l.status)),
-      el('td', { textContent: l.status === 'pending' ? `${l.duration_days} days after sign-in` : date(l.expires_at) }),
+    const actions = [btn('Edit', () => openEdit(l.id), 'btn btn-p'),
+      paid && l.status !== 'revoked' ? btn(l.paused_at ? 'Resume' : 'Pause', () => act(() => send('PATCH', '/licenses/' + l.id, { paused: !l.paused_at }).then(reload),
+        l.paused_at ? 'Resumed: the paused time was added back' : 'Paused: Free tier for now, the clock is frozen')) : null,
+      btn('Delete', () => deleteRow(l), 'btn btn-danger')];
+    return el('tr', { ondblclick: () => openEdit(l.id) }, el('td', {}, [l.name, l.surname].filter(Boolean).join(' '), l.note ? el('span', { title: l.note, className: 'ml-1', textContent: '📝' }) : null),
+      el('td', { textContent: l.email }), el('td', { textContent: l.tier }), el('td', {}, pill(l.status)),
+      el('td', { textContent: l.status === 'pending' ? `${l.duration_days} days after sign-in` : l.status === 'paused' ? `${date(l.expires_at)} (frozen)` : date(l.expires_at) }),
       el('td', { textContent: l.drive ? '✓' : '—' }), el('td', { textContent: String(l.shares) }), el('td', {}, ...actions));
   }));
   if (!rows.length) $('#lrows').replaceChildren(el('tr', {}, el('td', { colSpan: 8, className: 'text-slate-500', textContent: 'No licenses match.' })));
 }
+
+// ---------- edit dialog, delete ----------
+let editing = null;
+const ymd = ts => { const d = new Date(ts * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const refresh = async id => { await licenses(); overview(); const l = lics.find(x => x.id === id); if (l) fillEdit(l); };
+async function purge(l) { // everything about one person: needs the email typed, the server refuses the admin account
+  const typed = prompt(`This permanently deletes ${l.email} and ALL their data: licenses, links (and the files in their Google Drive), Drive login, sessions and activity log.\n\nType the email to confirm:`);
+  if (typed === null) return false;
+  if (typed.trim().toLowerCase() !== l.email.toLowerCase()) { toast('The email did not match: nothing was deleted'); return false; }
+  await act(() => send('DELETE', `/licenses/${l.id}?purge=true`), 'Person deleted'); await licenses(); overview(); return true;
+}
+async function deleteRow(l) {
+  if (l.surname === null) return purge(l);
+  if (!confirm(`Delete the license of ${l.name} ${l.surname} (${l.email})?\n\nThey keep their account and links and go back to the Free tier.`)) return;
+  await act(() => send('DELETE', '/licenses/' + l.id), 'License deleted'); await licenses(); overview();
+}
+function fillEdit(l) {
+  editing = l; const paid = l.surname !== null, activated = !!l.activated_at;
+  $('#eTitle').textContent = paid ? 'Edit license' : 'Edit free account (automatic)'; $('#eStatus').replaceChildren(pill(l.status));
+  $('#eName').value = l.name || ''; $('#eSurname').value = l.surname || ''; $('#eEmail').value = l.email; $('#eTier').value = l.tier; $('#eNote').value = l.note || '';
+  for (const id of ['eSurname', 'eEmail', 'eTier', 'eExp', 'eDur']) $('#' + id).disabled = !paid;
+  $('#eExpWrap').classList.toggle('hidden', !paid); $('#eEmailNote').classList.toggle('hidden', !paid); $('#eDelLic').classList.toggle('hidden', !paid);
+  $('#eExp').classList.toggle('hidden', !activated); $('#eDur').classList.toggle('hidden', activated);
+  $('#eExpLabel').textContent = activated ? 'Expires on' : 'Duration after the first sign-in (days)';
+  if (activated) $('#eExp').value = l.expires_at ? ymd(l.expires_at) : ''; else $('#eDur').value = l.duration_days || 30;
+  const quick = (label, body, msg) => btn(label, () => act(async () => { await send('PATCH', '/licenses/' + l.id, body); await refresh(l.id); }, msg));
+  $('#eQuick').replaceChildren(...(paid ? [quick('+30 days', { extend_days: 30 }, 'Extended by 30 days'), quick('+1 year', { extend_days: 365 }, 'Extended by 1 year'),
+    l.status !== 'revoked' ? quick(l.paused_at ? 'Resume' : 'Pause', { paused: !l.paused_at }, l.paused_at ? 'Resumed: the paused time was added back' : 'Paused: Free tier for now, the clock is frozen') : null,
+    quick(l.revoked ? 'Restore' : 'Revoke', { revoked: !l.revoked }, l.revoked ? 'Restored' : 'Revoked: blocked for good'),
+    cfg.email ? btn('Email license', () => act(() => send('POST', `/licenses/${l.id}/email`), 'Email sent')) : null].filter(Boolean) : []));
+}
+function openEdit(id) {
+  const l = lics.find(x => x.id === id); if (!l) return;
+  fillEdit(l); $('#eConfirm').value = ''; $('#eDelPerson').disabled = true; $('#eErr').classList.add('hidden'); $('#editModal').classList.remove('hidden');
+}
+$('#eClose').addEventListener('click', () => $('#editModal').classList.add('hidden'));
+$('#eConfirm').addEventListener('input', () => ($('#eDelPerson').disabled = $('#eConfirm').value.trim().toLowerCase() !== editing.email.toLowerCase()));
+$('#eDelPerson').addEventListener('click', async () => { if (await purge(editing)) $('#editModal').classList.add('hidden'); });
+$('#eDelLic').addEventListener('click', async () => {
+  const l = editing; await deleteRow(l); if (!lics.some(x => x.id === l.id)) $('#editModal').classList.add('hidden');
+});
+$('#editForm').addEventListener('submit', async e => {
+  e.preventDefault(); $('#eErr').classList.add('hidden');
+  const l = editing, paid = l.surname !== null, body = {}, put = (k, v, old) => { if (v !== (old ?? '')) body[k] = v; };
+  put('name', $('#eName').value.trim(), l.name); put('note', $('#eNote').value.trim(), l.note);
+  if (paid) {
+    put('surname', $('#eSurname').value.trim(), l.surname); put('email', $('#eEmail').value.trim().toLowerCase(), l.email); put('tier', $('#eTier').value, l.tier);
+    if (l.activated_at) { if ($('#eExp').value && $('#eExp').value !== ymd(l.expires_at)) body.expires_on = $('#eExp').value; }
+    else if (+$('#eDur').value !== l.duration_days) body.duration_days = +$('#eDur').value;
+  }
+  if (!Object.keys(body).length) return toast('Nothing changed');
+  try { await send('PATCH', '/licenses/' + l.id, body); await refresh(l.id); toast('Saved'); }
+  catch (err) { $('#eErr').textContent = err.message; $('#eErr').classList.remove('hidden'); }
+});
 
 // ---------- shared links ----------
 async function shares() {

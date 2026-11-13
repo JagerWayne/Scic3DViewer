@@ -17,7 +17,8 @@
   tr:hover td{background:rgba(255,255,255,.03)}
   .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11px;font-weight:700}
   .p-active{background:#16a34a33;color:#4ade80}.p-pending{background:#0ea5e933;color:#38bdf8}.p-expired{background:#f59e0b33;color:#fbbf24}
-  .p-revoked{background:#ef444433;color:#f87171}.p-free{background:#64748b44;color:#cbd5e1}
+  .p-revoked{background:#ef444433;color:#f87171}.p-free{background:#64748b44;color:#cbd5e1}.p-paused{background:#a855f733;color:#c084fc}
+  .btn-danger{background:#7f1d1d;border-color:#ef4444;color:#fff} .btn-danger:hover:not(:disabled){background:#b91c1c}
   .bar{display:flex;align-items:flex-end;gap:6px;height:120px}
   .bar>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px;min-width:0}
   .seg{width:100%;border-radius:3px 3px 0 0}
@@ -59,12 +60,12 @@
     <section id="t-licenses" class="hidden">
       <div class="flex flex-wrap gap-2 mb-3">
         <input class="inp" id="lq" placeholder="Search name or email" style="max-width:260px">
-        <select class="inp" id="lstatus" style="max-width:160px"><option value="">All statuses</option><option>active</option><option>pending</option><option>expired</option><option>revoked</option><option>free</option></select>
+        <select class="inp" id="lstatus" style="max-width:160px"><option value="">All statuses</option><option>active</option><option>pending</option><option>paused</option><option>expired</option><option>revoked</option><option>free</option></select>
         <span class="flex-1"></span>
         <button class="btn btn-p" id="newLic">+ New license</button>
       </div>
       <div class="card scroll"><table><thead><tr><th>Person</th><th>Email</th><th>Tier</th><th>Status</th><th>Expires</th><th>Drive</th><th>Links</th><th>Actions</th></tr></thead><tbody id="lrows"></tbody></table></div>
-      <p class="text-xs text-slate-400 mt-2">Free accounts are created automatically when someone signs in and are not editable. A license applies when its email signs in with Google; the duration starts at that first sign-in.</p>
+      <p class="text-xs text-slate-400 mt-2">Free accounts appear automatically when someone signs in: you can edit their name and note, or delete the person. A license applies when its email signs in with Google; the duration starts at that first sign-in. Pause = Free tier for now and the clock is frozen; Revoke = blocked for good.</p>
     </section>
 
     <section id="t-shares" class="hidden">
@@ -79,7 +80,7 @@
 </div>
 
 <div id="licModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
-  <form id="licForm" class="glass rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
+  <form id="licForm" class="glass modal-card rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
     <h2 class="text-lg font-bold">New license</h2>
     <div class="grid grid-cols-2 gap-2">
       <label class="text-xs">Name<input class="inp" id="fName" required maxlength="80"></label>
@@ -96,6 +97,33 @@
     <p class="text-xs text-red-400 hidden" id="fErr"></p>
     <p class="text-xs text-emerald-400 hidden" id="fOk"></p>
     <div class="flex justify-between"><button type="button" class="btn" id="fClose">Close</button><button class="btn btn-p">Create license</button></div>
+  </form>
+</div>
+<div id="editModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <form id="editForm" class="glass modal-card rounded-2xl p-6 w-full max-w-lg flex flex-col gap-3">
+    <div class="flex items-center justify-between"><h2 class="text-lg font-bold" id="eTitle">Edit license</h2><span id="eStatus"></span></div>
+    <div class="grid grid-cols-2 gap-2">
+      <label class="text-xs">Name<input class="inp" id="eName" required maxlength="80"></label>
+      <label class="text-xs">Surname<input class="inp" id="eSurname" maxlength="80"></label>
+    </div>
+    <label class="text-xs">Google email<input class="inp" id="eEmail" type="email" required maxlength="200"></label>
+    <p class="text-xs text-amber-400" id="eEmailNote">Changing the email moves this license to another Google account: the old account falls back to Free.</p>
+    <div class="grid grid-cols-2 gap-2">
+      <label class="text-xs">Tier<select class="inp" id="eTier"><option>FREE</option><option>PRO</option><option>ENTERPRISE</option></select></label>
+      <label class="text-xs" id="eExpWrap"><span id="eExpLabel">Expires on</span><input class="inp" id="eExp" type="date"><input class="inp hidden" id="eDur" type="number" min="1" max="36500"></label>
+    </div>
+    <label class="text-xs">Admin note (only you see it)<textarea class="inp" id="eNote" rows="2" maxlength="500"></textarea></label>
+    <div id="eQuick" class="flex flex-wrap gap-2"></div>
+    <details>
+      <summary class="text-sm text-red-400 cursor-pointer">Danger zone</summary>
+      <div class="flex flex-col gap-2 mt-2">
+        <button type="button" class="btn btn-danger" id="eDelLic">Delete this license (the person keeps their account and links)</button>
+        <label class="text-xs">Delete the person and ALL their data (links, Drive files, login, log). Type their email to confirm:<input class="inp" id="eConfirm" autocomplete="off"></label>
+        <button type="button" class="btn btn-danger" id="eDelPerson" disabled>Delete person and all data</button>
+      </div>
+    </details>
+    <p class="text-xs text-red-400 hidden" id="eErr"></p>
+    <div class="flex justify-between"><button type="button" class="btn" id="eClose">Close</button><button class="btn btn-p">Save changes</button></div>
   </form>
 </div>
 <div id="toast" class="hidden"></div>

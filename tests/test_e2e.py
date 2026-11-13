@@ -94,6 +94,38 @@ def test_share_dialog_on_a_phone(server):
         browser.close()
 
 
+def test_admin_edits_pauses_and_deletes_a_license(server):
+    adm = db.login_google("Boss", db.ADMIN_EMAIL, "test")[0]
+    db.create_license("Pat", "Pending", "pat@x.com", "PRO", "30d")
+    lic = lambda: db.connect().execute("SELECT * FROM licenses WHERE email='pat@x.com' AND surname IS NOT NULL").fetchone()
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = browser.new_context(bypass_csp=True).new_page(), []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(f"localStorage.setItem('scic_token','{adm}')")
+        page.goto(BASE + "/admin")
+        page.click("[data-tab=licenses]")
+        row = lambda: page.locator("#lrows tr", has_text="pat@x.com")
+        row().get_by_role("button", name="Edit").click()
+        page.fill("#eName", "Patricia"); page.fill("#eNote", "vip customer"); page.select_option("#eTier", "ENTERPRISE"); page.fill("#eDur", "120")
+        page.click("#editForm button:has-text('Save changes')")
+        page.wait_for_function("document.querySelector('#lrows').innerText.includes('Patricia')", timeout=15000)
+        l = lic()
+        assert (l["name"], l["note"], l["tier"], l["duration_days"]) == ("Patricia", "vip customer", "ENTERPRISE", 120)
+        page.click("#eClose")
+        row().get_by_role("button", name="Pause").click()
+        page.wait_for_function("document.querySelector('#lrows').innerText.includes('paused')", timeout=15000)
+        assert lic()["paused_at"]
+        row().get_by_role("button", name="Resume").click()
+        page.wait_for_function("!document.querySelector('#lrows').innerText.includes('paused')", timeout=15000)
+        assert lic()["paused_at"] is None
+        page.once("dialog", lambda d: d.accept())
+        row().get_by_role("button", name="Delete").click()
+        page.wait_for_function("!document.querySelector('#lrows').innerText.includes('pat@x.com')", timeout=15000)
+        assert lic() is None and not errors, errors
+        browser.close()
+
+
 def test_admin_page_only_for_the_admin(server):
     with sync_playwright() as p:
         browser = p.chromium.launch()
