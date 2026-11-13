@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scic3DViewer</title>
+<meta name="description" content="Scic3DViewer is a web application to view, edit, annotate and measure 3D models and share them with a link. Models are stored in your own Google Drive.">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  html,body{overflow:auto;height:auto}
+  main{max-width:860px;margin:0 auto;padding:40px 18px 56px;line-height:1.65}
+  h1{font-size:40px;margin:0 0 6px} h2{font-size:20px;margin:34px 0 8px;color:#7dd3fc}
+  .lead{font-size:19px;color:#cbd5e1} ul{padding-left:22px} li{margin:6px 0}
+  a{color:#38bdf8} .cta{display:inline-block;margin:18px 12px 0 0;padding:11px 22px;border-radius:12px;background:#0ea5e9;color:#fff;text-decoration:none;font-weight:600}
+  .cta.alt{background:rgba(255,255,255,.1)} .box{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:6px 18px 12px}
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid rgba(255,255,255,.12);font-size:14px;color:#94a3b8}
+  footer a{margin-right:16px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Scic3DViewer</h1>
+  <p class="lead">Scic3DViewer is a web application for opening, editing, annotating and measuring 3D models in your browser, and for sharing them with anyone through a simple link.</p>
+  <a class="cta" href="/studio">Open the Studio</a><a class="cta alt" href="/privacy">Privacy Policy</a><a class="cta alt" href="/terms">Terms of Service</a>
+
+  <h2>What Scic3DViewer is for</h2>
+  <ul>
+    <li><b>View and edit 3D models</b> (GLB, GLTF, OBJ, STL, FBX, 3MF and STEP): rearrange parts, paint surfaces, tune materials and lighting, slice a model open and explode an assembly.</li>
+    <li><b>Inspect</b> models with a ruler, angle and wall-thickness tools, and add callouts with a guided tour.</li>
+    <li><b>Share</b> a model as a web link that opens in any browser, optionally protected by a password or an expiry date, or embed it on a website.</li>
+    <li><b>Export</b> to GLB, OBJ, STL or USDZ, and capture images or a 360&deg; video.</li>
+  </ul>
+
+  <h2>How Scic3DViewer uses your Google account</h2>
+  <div class="box">
+    <p><b>Sign in with Google.</b> You sign in with your Google account. The app receives your name and email address only, to identify you, to apply the license issued to your email and to show your projects. It never sees your Google password.</p>
+    <p><b>Your own Google Drive.</b> If you choose &ldquo;Connect Drive&rdquo;, the app asks for the permission <code>drive.file</code>. With it the app can create and manage <i>only the files it creates itself</i>
+    (a folder named &ldquo;Scic3DViewer&rdquo; and the models you publish). It cannot see any other file in your Drive. Your published models are stored there, in your Drive, not on our server.</p>
+    <p>Details on what is collected, why, how long it is kept and how to delete it are in the <a href="/privacy">Privacy Policy</a>.
+    Scic3DViewer&rsquo;s use and transfer of information received from Google APIs adheres to the
+    <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+  </div>
+
+  <h2>Free and paid plans</h2>
+  <p>Scic3DViewer has a Free tier. Pro and Enterprise licenses unlock larger files, more tools, link passwords, more export formats and CAD import.</p>
+
+  <footer>
+    <a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a><a href="/studio">Open the Studio</a><a href="mailto:{{CONTACT}}">Contact: {{CONTACT}}</a>
+    <div style="margin-top:10px">Scic3DViewer is operated by {{OPERATOR}}.</div>
+  </footer>
+</main>
+</body>
+</html>

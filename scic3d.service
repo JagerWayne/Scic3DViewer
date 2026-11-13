@@ -1,6 +1,6 @@
-# systemd unit for Scic3D. Installed by install-service.sh to /etc/systemd/system/scic3d.service
+# systemd unit for Scic3DViewer. Installed by install-service.sh to /etc/systemd/system/scic3d.service
 [Unit]
-Description=Scic3D viewer and studio
+Description=Scic3DViewer service
 After=network-online.target
 Wants=network-online.target
 

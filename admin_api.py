@@ -39,7 +39,7 @@ def status(r) -> str:
 
 
 def _mail_license(row_email: str, name: str, tier: str, duration: str):
-    mailer.send(row_email, "Your Scic3D license",
+    mailer.send(row_email, "Your Scic3DViewer license",
                 f"Hello {name},\n\nYour {tier} license ({duration} from your first sign-in) is ready.\n"
                 f"Sign in with the Google account {row_email} at {storage.BASE_URL}/studio and it unlocks automatically.\n")
 

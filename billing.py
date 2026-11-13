@@ -69,7 +69,7 @@ def register(app, current_user, rate_limit):
                 db.create_license(name, "(customer)", meta["email"], tier, dur)
                 db.log(0, "purchase", "", sid)
                 try:
-                    mailer.send(meta["email"], "Your Scic3D license is active",
+                    mailer.send(meta["email"], "Your Scic3DViewer license is active",
                                 f"Thank you! Your {tier} license ({dur}) is ready.\nSign in with Google ({meta['email']}) at "
                                 f"{storage.BASE_URL}/studio and it unlocks automatically.")
                 except Exception:

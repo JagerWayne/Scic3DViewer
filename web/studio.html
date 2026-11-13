@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Scic3D Studio</title>
+<title>Scic3DViewer Studio</title>
 <link rel="stylesheet" href="/static/app.css">
 <script type="importmap" nonce="{{NONCE}}">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","qrcode-generator":"https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm"}}
@@ -14,7 +14,7 @@
 <div id="stage"></div>
 
 <header class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-2 px-3 overflow-x-auto whitespace-nowrap">
-  <b class="mr-2">Scic3D Studio</b>
+  <b class="mr-2">Scic3DViewer Studio</b>
   <button class="btn" id="open">Open model</button>
   <button class="btn" id="add" data-need="assembly">Add model</button>
   <input type="file" id="file" accept=".glb,.gltf,.obj,.stl,.fbx,.3mf,.step,.stp" multiple class="hidden">
@@ -115,6 +115,7 @@
   <details class="sec"><summary>Capture</summary><div data-need="capture">
     <div class="row"><button class="btn" id="png">Transparent PNG</button><button class="btn" id="webm">360° WebM</button></div>
   </div></details>
+  <p class="text-xs text-slate-500 p-3"><a class="underline" href="/privacy" target="_blank" rel="noopener">Privacy</a> &middot; <a class="underline" href="/terms" target="_blank" rel="noopener">Terms</a></p>
 </aside>
 
 <div id="tour"></div>
@@ -122,11 +123,11 @@
 
 <div id="authModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
   <div id="authForm" class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-3">
-    <h2 class="text-lg font-bold">Welcome to Scic3D Studio</h2>
+    <h2 class="text-lg font-bold">Welcome to Scic3DViewer Studio</h2>
     <p class="text-sm text-slate-300">Sign in with your Google account. If you bought a Pro or Enterprise license, use the Google account with the email it was issued to: it unlocks automatically.</p>
     <p class="text-xs text-red-400 hidden" id="authErr"></p>
     <a href="/auth/google/login" class="btn btn-p text-center py-2">Sign in with Google</a>
-    <p class="text-xs text-slate-400">We only read your name and email address.</p>
+    <p class="text-xs text-slate-400">We only read your name and email address. By signing in you agree to the <a class="underline text-sky-400" href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the <a class="underline text-sky-400" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
   </div>
 </div>
 

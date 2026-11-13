@@ -1,4 +1,5 @@
-import gzip, itertools, json, re, secrets, shutil, time, zlib
+import gzip, itertools, json, os, re, secrets, shutil, time, zlib
+from html import escape
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -16,6 +17,8 @@ import storage
 db.init()
 WEB = Path(__file__).parent / "web"
 MAX_BODY = 520 * db.MB
+OPERATOR = os.environ.get("SCIC_OPERATOR", "Scic3DViewer")  # shown in the legal pages
+CONTACT = os.environ.get("SCIC_CONTACT_EMAIL", db.ADMIN_EMAIL)
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,24}$")
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -52,7 +55,7 @@ async def guard(request: Request, call_next):
 
 def page(name: str, embed: bool = False):
     nonce = secrets.token_urlsafe(12)
-    html = (WEB / name).read_text("utf-8").replace("{{NONCE}}", nonce)
+    html = (WEB / name).read_text("utf-8").replace("{{NONCE}}", nonce).replace("{{OPERATOR}}", escape(OPERATOR)).replace("{{CONTACT}}", escape(CONTACT))
     return HTMLResponse(html, headers={"Content-Security-Policy": CSP.format(n=nonce, fa="*" if embed else "'none'")})
 
 
@@ -72,6 +75,10 @@ def me_payload(u):
 
 # ---------- pages ----------
 @app.get("/", include_in_schema=False)
+def home():  # public page that explains the app and links the legal pages (Google verification needs it)
+    return page("home.html")
+
+
 @app.get("/studio")
 def studio():
     return page("studio.html")
@@ -80,6 +87,16 @@ def studio():
 @app.get("/admin")
 def admin_page():  # the page is static; every admin API call checks the signed-in Google email
     return page("admin.html")
+
+
+@app.get("/privacy")
+def privacy_page():
+    return page("privacy.html")
+
+
+@app.get("/terms")
+def terms_page():
+    return page("terms.html")
 
 
 @app.get("/help/drive")

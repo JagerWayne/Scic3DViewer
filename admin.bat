@@ -8,7 +8,7 @@ if not "%~1"=="" (
 )
 :menu
 echo.
-echo  Scic3D license admin
+echo  Scic3DViewer license admin
 echo  [1] New license
 echo  [2] List licenses
 echo  [3] Revoke a license

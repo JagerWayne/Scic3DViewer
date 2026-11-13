@@ -1,4 +1,4 @@
-# Google sign-in and Google Drive in Scic3D: how it works and how to set it up
+# Google sign-in and Google Drive in Scic3DViewer: how it works and how to set it up
 
 **Sign-in.** The only way to log in is **Sign in with Google**. Google confirms the user's email; a license you create with
 `python admin.py new` applies automatically to the Google account with that email. The same Google app set up in Part A
@@ -33,7 +33,7 @@ people for permission". It is free.
 ## A1. Create a Google Cloud project
 1. Open <https://console.cloud.google.com/> and sign in. Accept the Terms of Service if asked.
 2. At the top, click the **project picker** (next to the Google Cloud logo) → **New project**.
-3. **Project name:** `Scic3D` → **Create**. Wait for the bell icon notification, then select the project so `Scic3D` shows at the top.
+3. **Project name:** `Scic3DViewer` → **Create**. Wait for the bell icon notification, then select the project so `Scic3DViewer` shows at the top.
 
 ## A2. Turn on the Google Drive API
 1. Menu (three lines) → **APIs & Services** → **Library**.
@@ -42,15 +42,16 @@ people for permission". It is free.
 
 ## A3. Set up the permission screen
 1. Menu → **APIs & Services** → **OAuth consent screen** (newer name: **Google Auth Platform**; click **Get started** if shown).
-2. **App name:** the name your users will see, e.g. `Scic3D`. **User support email:** your email. → **Next**.
+2. **App name:** the name your users will see, e.g. `Scic3DViewer`. **User support email:** your email. → **Next**.
 3. **Audience:** **External** → **Next**. **Contact email:** your email → **Next**. Tick the policy box → **Continue** → **Create**.
+   Then open **Branding** and fill in **Application home page** `https://YOUR-DOMAIN/` (the public landing page, NOT /studio), **Privacy policy** `https://YOUR-DOMAIN/privacy` and **Terms of service** `https://YOUR-DOMAIN/terms` (these pages are built into the site; set `SCIC_OPERATOR` and `SCIC_CONTACT_EMAIL` in `.env`), and add your domain under **Authorized domains**.
 4. Open **Data Access** → **Add or remove scopes** → make sure these are ticked: **`openid`**, **`.../auth/userinfo.email`**, **`.../auth/userinfo.profile`** (sign-in; usually already there) and **`.../auth/drive.file`** (Drive) → **Update** → **Save**.
    This is the narrow permission: the site can only touch files **it creates itself**, never the user's other files.
 
 ## A4. Create the "Web application" client
 1. Menu → **APIs & Services** → **Credentials** (newer: **Google Auth Platform → Clients**) → **+ Create credentials → OAuth client ID** (newer: **+ Create client**).
 2. **Application type: Web application** (not "Desktop app").
-3. **Name:** `Scic3D web`.
+3. **Name:** `Scic3DViewer web`.
 4. Under **Authorized redirect URIs** click **+ Add URI** and type the address of your site followed by `/auth/google/callback`:
    * Testing on your own computer: `http://127.0.0.1:6711/auth/google/callback`
    * Real website: `https://your-domain.com/auth/google/callback` (Google requires **https** for real websites)

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scic3DViewer Privacy Policy</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  html,body{overflow:auto;height:auto}
+  main{max-width:780px;margin:0 auto;padding:24px 16px 64px;line-height:1.65}
+  h1{font-size:28px;margin:0 0 4px} h2{font-size:18px;margin:30px 0 8px;color:#7dd3fc}
+  ul{padding-left:22px} li{margin:5px 0} a{color:#38bdf8}
+  table{width:100%;border-collapse:collapse;font-size:14px} td,th{border:1px solid rgba(255,255,255,.15);padding:8px;text-align:left;vertical-align:top}
+  th{background:rgba(255,255,255,.08)} .muted{color:#94a3b8;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/studio">&larr; Back to the Studio</a> &middot; <a href="/terms">Terms of Service</a></p>
+  <h1>Scic3DViewer Privacy Policy</h1>
+  <p class="muted">Last updated: 13 November 2026</p>
+
+  <p>This policy applies to <b>Scic3DViewer</b> (the &ldquo;app&rdquo;), a web application for viewing, editing, annotating and sharing 3D models, operated by <b>{{OPERATOR}}</b> (&ldquo;we&rdquo;).
+  It explains what personal data we collect, why, and what your choices are. Questions or requests: <a href="mailto:{{CONTACT}}">{{CONTACT}}</a>.</p>
+
+  <h2>1. What we collect</h2>
+  <table>
+    <tr><th>Data</th><th>Why</th><th>Where it comes from</th></tr>
+    <tr><td><b>Name and email address</b> of your Google account</td><td>To sign you in, to apply the license issued to your email, and to send license emails</td><td>&ldquo;Sign in with Google&rdquo;. We never see your Google password.</td></tr>
+    <tr><td><b>Session token</b> (a random code, stored hashed on our server and in your browser&rsquo;s local storage)</td><td>To keep you signed in for up to 30 days</td><td>Created when you sign in. We do not use tracking cookies.</td></tr>
+    <tr><td><b>Google Drive access token</b>, only if you click &ldquo;Connect Drive&rdquo;</td><td>To save your shared models in your own Drive and to show them to people who open your links</td><td>Google. Stored <b>encrypted</b> on our server. You can disconnect at any time.</td></tr>
+    <tr><td><b>Your shared projects</b>: title, scene settings (camera, lighting, callout texts), link options (expiry, password hash, permissions), view counter</td><td>To provide the sharing service</td><td>What you publish. The 3D model file itself is stored in <b>your</b> Google Drive, not on our server.</td></tr>
+    <tr><td><b>License data</b>: tier, start and end dates, name and email</td><td>To grant the features you are entitled to</td><td>Issued by us or created after a payment.</td></tr>
+    <tr><td><b>Activity log</b>: time, action (sign-in, publish, view of a link, admin action), IP address</td><td>Security, abuse prevention, troubleshooting and basic usage statistics</td><td>Our server, automatically</td></tr>
+    <tr><td><b>Payment information</b></td><td>To sell licenses</td><td>Handled entirely by <b>Stripe</b>. We never receive your card number; we only learn that a payment succeeded, your email and the plan.</td></tr>
+  </table>
+  <p>People who merely <b>open a share link</b> are not asked for any personal data. Their IP address is written to the activity log and counted in the view counter. If the link is password protected, the password they type is checked on our server and not stored.</p>
+
+  <h2>2. Google user data</h2>
+  <p>Scic3DViewer requests these Google permissions (scopes), and nothing else:</p>
+  <ul>
+    <li><code>openid</code>, <code>https://www.googleapis.com/auth/userinfo.email</code> and <code>https://www.googleapis.com/auth/userinfo.profile</code> (when you sign in): your <b>name</b> and <b>email address</b>. We use them only to identify you, create your session, apply the license issued to your email and show your name in the app.</li>
+    <li><code>https://www.googleapis.com/auth/drive.file</code> (only if you click &ldquo;Connect Drive&rdquo;): access to the files and folders <b>the app itself creates</b> in your Drive. We use it only to save, read and delete the models you publish.</li>
+  </ul>
+  <p>If you connect Google Drive we request only the permission <code>drive.file</code>: access to the files and folders <b>this application itself creates</b>
+  (the folder <code>Scic3DViewer</code> and the models inside). We cannot see, read or change any other file in your Drive. We use this access only to store, read and delete those
+  model files on your behalf. We do not sell Google user data, do not use it for advertising and do not allow humans to read it except where you ask us for support, it is needed for security, or the law requires it.</p>
+  <p>The use and transfer to any other app of information received from Google APIs will adhere to the
+  <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+  <p><b>How Google user data is stored, shared and deleted.</b> Your name and email address are stored in our database. The Drive access token is stored encrypted. We do not share Google user data with third parties, except with service providers that run the app for us (hosting, and the email provider if we email you a license) and where the law requires it. We never use Google user data for advertising or to train AI models, and we do not sell it. You can delete it at any time: disconnect Drive (the token is deleted and revoked at Google), delete your projects (the files are deleted from your Drive), or email us to delete your account data.</p>
+
+  <h2>3. Legal bases (EU/UK users)</h2>
+  <ul>
+    <li><b>Contract</b>: signing you in, hosting your links, applying your license.</li>
+    <li><b>Legitimate interests</b>: security, abuse prevention, the activity log, keeping the service running.</li>
+    <li><b>Consent</b>: connecting Google Drive (you can withdraw it by disconnecting).</li>
+    <li><b>Legal obligation</b>: keeping records of payments where the law requires it.</li>
+  </ul>
+
+  <h2>4. Who receives data</h2>
+  <ul>
+    <li><b>Google</b> (sign-in and Drive storage).</li>
+    <li><b>Stripe</b> (payments), only if you buy a license.</li>
+    <li><b>Our email provider</b>, only to deliver license emails to you.</li>
+    <li><b>Hosting provider</b> of the server we run on.</li>
+    <li><b>Content delivery networks</b> (jsDelivr, Tailwind CDN, Google static servers): the pages load the 3D engine and styles from these services, so they receive your IP address and browser details when a page opens, as with any website that uses them.</li>
+  </ul>
+  <p>We do not sell personal data and do not run advertising or analytics trackers.</p>
+
+  <h2>5. International transfers</h2>
+  <p>Google and Stripe may process data outside your country, including in the United States, under their own safeguards (such as standard contractual clauses).</p>
+
+  <h2>6. How long we keep data</h2>
+  <ul>
+    <li>Sessions: up to 30 days, or until you sign out.</li>
+    <li>Drive token: until you disconnect Drive or ask us to delete your data.</li>
+    <li>Shared project records: until you delete the project or your data.</li>
+    <li>Activity log: kept while needed for security and statistics, and removed when you ask us to delete your data.</li>
+    <li>Payment and license records: as long as the law requires.</li>
+  </ul>
+
+  <h2>7. Your rights and how to use them</h2>
+  <p>Depending on where you live you may ask us to give you a copy of your data, correct it, delete it, restrict or object to its processing, and you may complain to your data protection authority.
+  Write to <a href="mailto:{{CONTACT}}">{{CONTACT}}</a> from the email address of your account; we reply within 30 days.</p>
+  <p>You can already do part of this yourself: delete projects in <b>My projects</b> (this also deletes the file from your Drive), disconnect Drive in the Drive window (this deletes our stored token
+  and revokes it at Google), and withdraw access in your Google account at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</p>
+
+  <h2>8. Security</h2>
+  <p>Connections use HTTPS. Drive tokens are encrypted at rest, link passwords and session tokens are stored only as hashes, the admin area accepts only the verified administrator account,
+  and access to files in your Drive is limited to the narrow permission described above. No system is perfectly secure; if a breach affects you we will inform you as the law requires.</p>
+
+  <h2>9. Children</h2>
+  <p>The service is not directed at children under 16 and we do not knowingly collect their data.</p>
+
+  <h2>10. Changes</h2>
+  <p>We may update this policy; the date at the top shows the latest version. Significant changes will be announced in the Studio.</p>
+
+  <h2>11. Contact</h2>
+  <p>{{OPERATOR}} &middot; <a href="mailto:{{CONTACT}}">{{CONTACT}}</a></p>
+</main>
+</body>
+</html>

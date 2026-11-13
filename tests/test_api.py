@@ -116,6 +116,27 @@ def test_drive_follows_license_change():
         assert con.execute("SELECT 1 FROM drive_tokens WHERE license_id=?", (lid_pro,)).fetchone()  # connection carried over
 
 
+def test_homepage_meets_google_verification_rules():
+    home = c.get("/")                                                      # public, no login, plain server-rendered HTML
+    assert home.status_code == 200 and "<title>Scic3DViewer</title>" in home.text and "<h1>Scic3DViewer</h1>" in home.text
+    assert 'href="/privacy"' in home.text and 'href="/terms"' in home.text  # visible links to the legal pages
+    assert "web application for opening, editing, annotating and measuring 3D models" in home.text  # states the purpose
+    assert "drive.file" in home.text and "{{" not in home.text
+    assert c.get("/privacy").text != home.text                             # the privacy policy is a different page than the homepage
+    privacy = c.get("/privacy").text
+    for scope in ("openid", "userinfo.email", "userinfo.profile", "drive.file"):
+        assert scope in privacy
+    assert "Scic3DViewer Privacy Policy" in privacy and "Scic3DViewer" in c.get("/studio").text
+
+
+def test_legal_pages_are_public_and_filled_in():
+    for path, title in (("/privacy", "Privacy Policy"), ("/terms", "Terms of Service")):
+        r = c.get(path)
+        assert r.status_code == 200 and title in r.text
+        assert "{{" not in r.text and appmod.CONTACT in r.text           # placeholders were replaced
+    assert "drive.file" in c.get("/privacy").text and "Google API Services User Data Policy" in c.get("/privacy").text
+
+
 def test_drive_help_is_public():
     r = c.get("/help/drive")  # no login needed
     assert r.status_code == 200 and "Connect Google Drive" in r.text

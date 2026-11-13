@@ -1,4 +1,4 @@
-# Putting Scic3D on the internet
+# Putting Scic3DViewer on the internet
 
 > Installing straight on an Ubuntu server (no Docker), in `/home/wayne/python/s3dv`? Follow **[UBUNTU.md](UBUNTU.md)** instead.
 
@@ -21,7 +21,7 @@ SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=you@example.com
 SMTP_PASSWORD=app-password
-SMTP_FROM=Scic3D <you@example.com>
+SMTP_FROM=Scic3DViewer <you@example.com>
 
 # optional: paid upgrades with Stripe (see below)
 STRIPE_SECRET_KEY=sk_live_...

@@ -1,4 +1,4 @@
-# Scic3D on Ubuntu (22.04 or newer), installed in /home/wayne/python/s3dv
+# Scic3DViewer on Ubuntu (22.04 or newer), installed in /home/wayne/python/s3dv
 
 The site runs as a systemd service under the user `wayne`, listens only on `127.0.0.1:6711`, and Caddy in front of it
 provides the public HTTPS address. Models are not stored on the server (they live in each user's Google Drive); the server keeps
