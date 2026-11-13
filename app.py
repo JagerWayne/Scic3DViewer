@@ -149,7 +149,11 @@ def drive_callback(request: Request, state: str = "", code: str = "", error: str
             raise ValueError(error or "cancelled")
         kind, lid, claims = storage.finish(state, code)
         if kind == "login":  # token goes in the URL fragment: never sent to a server or written to logs
-            token, _ = db.login_google(claims.get("name"), claims["email"], request.client.host)
+            drive_token = claims.pop("drive_token", None)
+            token, lic = db.login_google(claims.get("name"), claims["email"], request.client.host)
+            if drive_token:  # Drive was allowed on the same Google screen
+                storage.save_token(lic["id"], drive_token)
+                db.log(lic["id"], "drive_connect", request.client.host, "at sign-in")
             return RedirectResponse("/studio#token=" + token, 303)
         db.log(lid, "drive_connect", request.client.host)
         return RedirectResponse("/studio?drive=connected", 303)

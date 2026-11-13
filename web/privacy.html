@@ -28,7 +28,7 @@
     <tr><th>Data</th><th>Why</th><th>Where it comes from</th></tr>
     <tr><td><b>Name and email address</b> of your Google account</td><td>To sign you in, to apply the license issued to your email, and to send license emails</td><td>&ldquo;Sign in with Google&rdquo;. We never see your Google password.</td></tr>
     <tr><td><b>Session token</b> (a random code, stored hashed on our server and in your browser&rsquo;s local storage)</td><td>To keep you signed in for up to 30 days</td><td>Created when you sign in. We do not use tracking cookies.</td></tr>
-    <tr><td><b>Google Drive access token</b>, only if you click &ldquo;Connect Drive&rdquo;</td><td>To save your shared models in your own Drive and to show them to people who open your links</td><td>Google. Stored <b>encrypted</b> on our server. You can disconnect at any time.</td></tr>
+    <tr><td><b>Google Drive access token</b>, only if you allow Drive access (at sign-in or with &ldquo;Connect Drive&rdquo;)</td><td>To save your shared models in your own Drive and to show them to people who open your links</td><td>Google. Stored <b>encrypted</b> on our server. You can disconnect at any time.</td></tr>
     <tr><td><b>Your shared projects</b>: title, scene settings (camera, lighting, callout texts), link options (expiry, password hash, permissions), view counter</td><td>To provide the sharing service</td><td>What you publish. The 3D model file itself is stored in <b>your</b> Google Drive, not on our server.</td></tr>
     <tr><td><b>License data</b>: tier, start and end dates, name and email</td><td>To grant the features you are entitled to</td><td>Issued by us or created after a payment.</td></tr>
     <tr><td><b>Activity log</b>: time, action (sign-in, publish, view of a link, admin action), IP address</td><td>Security, abuse prevention, troubleshooting and basic usage statistics</td><td>Our server, automatically</td></tr>
@@ -40,7 +40,7 @@
   <p>Scic3DViewer requests these Google permissions (scopes), and nothing else:</p>
   <ul>
     <li><code>openid</code>, <code>https://www.googleapis.com/auth/userinfo.email</code> and <code>https://www.googleapis.com/auth/userinfo.profile</code> (when you sign in): your <b>name</b> and <b>email address</b>. We use them only to identify you, create your session, apply the license issued to your email and show your name in the app.</li>
-    <li><code>https://www.googleapis.com/auth/drive.file</code> (only if you click &ldquo;Connect Drive&rdquo;): access to the files and folders <b>the app itself creates</b> in your Drive. We use it only to save, read and delete the models you publish.</li>
+    <li><code>https://www.googleapis.com/auth/drive.file</code> (asked on the same Google screen as sign-in, and again if you click &ldquo;Connect Drive&rdquo;; you may untick it and still use the app, but then you cannot publish links): access to the files and folders <b>the app itself creates</b> in your Drive. We use it only to save, read and delete the models you publish.</li>
   </ul>
   <p>If you connect Google Drive we request only the permission <code>drive.file</code>: access to the files and folders <b>this application itself creates</b>
   (the folder <code>Scic3DViewer</code> and the models inside). We cannot see, read or change any other file in your Drive. We use this access only to store, read and delete those

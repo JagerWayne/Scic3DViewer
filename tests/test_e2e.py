@@ -41,7 +41,7 @@ def test_studio_publish_projects_and_viewer(server):
     token = db.login_google("E2E User", "e2e@x.com", "test")[0]
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
-        ctx = browser.new_context()
+        ctx = browser.new_context(bypass_csp=True)  # Playwright polls with eval(), which the site CSP rightly forbids
         studio, errors = ctx.new_page(), []
         studio.on("pageerror", lambda e: errors.append(str(e)))
         studio.add_init_script(f"localStorage.setItem('scic_token','{token}')")
@@ -67,12 +67,39 @@ def test_studio_publish_projects_and_viewer(server):
         browser.close()
 
 
+def test_share_dialog_on_a_phone(server):
+    token = db.login_google("Phone User", "phone@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, bypass_csp=True).new_page()
+        page.add_init_script(f"localStorage.setItem('scic_token','{token}')")
+        page.goto(BASE + "/studio")
+        page.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
+        page.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
+        page.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+        shown = lambda sel: page.evaluate(f"getComputedStyle(document.querySelector('{sel}')).display")
+        assert page.evaluate("document.querySelector('#panel').offsetHeight") <= 2      # settings sheet starts closed on a phone (just its border shows)
+        page.click("#share")
+        assert [shown(s) for s in ("#panel", "#tools", "#tour")] == ["none"] * 3         # windows behind the dialog are hidden
+        card = page.locator("#shareModal .modal-card").bounding_box()
+        assert card["width"] >= 388 and card["y"] > 0                                    # a full-width bottom sheet
+        go = page.locator("#sGo").bounding_box()
+        assert go["height"] >= 44 and go["y"] + go["height"] <= 844                      # thumb-sized, always on screen
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")       # no sideways scrolling
+        page.click("#sGo")
+        page.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.click("#sClose")
+        assert shown("#tools") != "none"                                                 # everything is back after closing
+        browser.close()
+
+
 def test_admin_page_only_for_the_admin(server):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         for email, expect in ((db.ADMIN_EMAIL, "Overview"), ("someone@x.com", "not the site admin")):
             token = db.login_google("T", email, "test")[0]
-            page = browser.new_context().new_page()
+            page = browser.new_context(bypass_csp=True).new_page()
             page.add_init_script(f"localStorage.setItem('scic_token','{token}')")
             page.goto(BASE + "/admin")
             page.wait_for_function(f"document.body.innerText.includes({expect!r})", timeout=30000)

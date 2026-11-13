@@ -43,9 +43,10 @@ def _flow(scopes, state=None):
 
 
 def begin(purpose: str, lid: int | None = None) -> str:
-    """Google consent URL. purpose='login' (identity only) or 'drive' (needs the license id)."""
-    flow = _flow(LOGIN_SCOPES if purpose == "login" else SCOPES); state = secrets.token_urlsafe(24)
-    extra = {"prompt": "select_account"} if purpose == "login" else {"access_type": "offline", "prompt": "consent"}  # consent -> always a refresh token
+    """Google consent URL. purpose='login' (identity + Drive in one screen) or 'drive' (reconnect, needs the license id)."""
+    flow = _flow(LOGIN_SCOPES + SCOPES if purpose == "login" else SCOPES); state = secrets.token_urlsafe(24)
+    # offline access gives the refresh token Drive needs; the first consent always returns it, "consent" forces it when reconnecting
+    extra = {"prompt": "select_account", "access_type": "offline"} if purpose == "login" else {"access_type": "offline", "prompt": "consent"}
     url, _ = flow.authorization_url(state=state, **extra)
     now = time.time()
     for k in [k for k, v in _pending.items() if v[3] < now]:
@@ -65,21 +66,30 @@ def finish(state: str, code: str):
     kind, lid, verifier, exp = _pending.pop(state, (None, None, None, 0))
     if kind is None or exp < time.time():
         raise ValueError("Sign-in expired, please try again")
-    flow = _flow(LOGIN_SCOPES if kind == "login" else SCOPES, state); flow.code_verifier = verifier; flow.fetch_token(code=code)
+    flow = _flow(LOGIN_SCOPES + SCOPES if kind == "login" else SCOPES, state); flow.code_verifier = verifier; flow.fetch_token(code=code)
+    creds = flow.credentials
     if kind == "login":
         from google.auth.transport import requests as greq
         from google.oauth2 import id_token
-        claims = id_token.verify_oauth2_token(flow.credentials.id_token, greq.Request(), flow.client_config["client_id"])
+        claims = id_token.verify_oauth2_token(creds.id_token, greq.Request(), flow.client_config["client_id"])
         if not claims.get("email_verified") or not claims.get("email"):
             raise ValueError("Google did not confirm this email")
+        # Google lets people untick the Drive box: then they are still signed in, just without a Drive connection
+        if creds.refresh_token and SCOPES[0] in set(getattr(creds, "granted_scopes", None) or creds.scopes or []):
+            claims["drive_token"] = creds.to_json()
         return kind, None, claims
-    if not flow.credentials.refresh_token:
+    if not creds.refresh_token:
         raise ValueError("Google did not grant offline access")
+    save_token(lid, creds.to_json())
+    return kind, lid, None
+
+
+def save_token(lid: int, creds_json: str):
+    """Store (replace) the user's Google Drive login, encrypted."""
     with db.connect() as c:
         c.execute("INSERT OR REPLACE INTO drive_tokens(license_id,token_enc,connected_at) VALUES(?,?,?)",
-                  (lid, _fernet().encrypt(flow.credentials.to_json().encode()).decode(), int(time.time())))
+                  (lid, _fernet().encrypt(creds_json.encode()).decode(), int(time.time())))
     _svc.pop(lid, None)
-    return kind, lid, None
 
 
 def disconnect(lid: int):

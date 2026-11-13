@@ -40,7 +40,13 @@ function applyMe() {
   if (!$('#tour').children.length) mountTour(stage, $('#tour'), can('tour'), () => toast('Fly-to tour needs the PRO tier'));
 }
 async function boot() {
-  if (token) { try { me = await call('/api/me'); applyMe(); return; } catch { token = null; store.set('scic_token'); } }
+  if (token) {
+    try {
+      me = await call('/api/me'); applyMe();
+      if (fromGoogle && !me.drive_connected && me.drive_available) show('driveModal'); // signed in but Drive was not allowed: ask again
+      return;
+    } catch { token = null; store.set('scic_token'); }
+  }
   const q = new URLSearchParams(location.search).get('login');
   if (q) {
     history.replaceState(null, '', '/studio');
@@ -212,6 +218,10 @@ on('share', 'click', () => {
 });
 on('sClose', 'click', () => show('shareModal', false));
 on('sCopy', 'click', () => navigator.clipboard?.writeText(val('sUrl')).then(() => toast('Link copied')));
+if (navigator.share) { // phones: the system share sheet (WhatsApp, Mail, Messages...)
+  $('#sNative').classList.remove('hidden');
+  on('sNative', 'click', () => navigator.share({ title: val('sTitle') || 'Scic3DViewer', url: val('sUrl') }).catch(() => {}));
+}
 on('sCopyEmbed', 'click', () => navigator.clipboard?.writeText(val('sEmbed')).then(() => toast('Embed code copied')));
 async function showQr(url) { // the QR library loads from the CDN only when a link is created
   const img = $('#sQr');
@@ -297,5 +307,12 @@ on('upClose', 'click', () => show('upgradeModal', false));
 // ---------- lighting ----------
 on('lpreset', 'change', () => stage.setLightPreset(val('lpreset')));
 on('shadows', 'change', e => stage.setShadows(e.target.checked));
+
+// ---------- phones: dialogs become bottom sheets and the other windows get out of the way ----------
+const modals = [...document.querySelectorAll('[id$="Modal"]')];
+modals.forEach(m => m.firstElementChild?.classList.add('modal-card'));
+new MutationObserver(() => document.body.classList.toggle('modal-open', modals.some(m => !m.classList.contains('hidden'))))
+  .observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+if (matchMedia('(max-width: 768px)').matches) $('#panel').classList.add('closed'); // start with the canvas, not the settings sheet
 
 boot();

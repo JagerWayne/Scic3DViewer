@@ -105,6 +105,25 @@ def test_google_login_flow(monkeypatch):
     assert c.get("/auth/google/callback?state=s&code=x", follow_redirects=False).headers["location"] == "/studio?login=error"
 
 
+def test_login_asks_for_drive_on_the_same_google_screen(monkeypatch, tmp_path):
+    client = tmp_path / "client.json"
+    client.write_text(json.dumps({"web": {"client_id": "cid", "client_secret": "s", "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                                          "token_uri": "https://oauth2.googleapis.com/token", "redirect_uris": ["http://x/auth/google/callback"]}}))
+    monkeypatch.setattr(storage, "CLIENT", client)
+    url = storage.begin("login")
+    assert "drive.file" in url and "userinfo.email" in url and "access_type=offline" in url   # one consent screen for both
+    saved = {}
+    monkeypatch.setattr(storage, "save_token", lambda lid, tok: saved.update({lid: tok}))
+    monkeypatch.setattr(storage, "purpose", lambda s: "login")
+    monkeypatch.setattr(storage, "finish", lambda s, code: ("login", None, {"email": "d1@x.com", "name": "D", "drive_token": "TOK"}))
+    c.get("/auth/google/callback?state=s&code=x", follow_redirects=False)
+    assert list(saved.values()) == ["TOK"]                                                    # Drive allowed: connected at sign-in
+    saved.clear()
+    monkeypatch.setattr(storage, "finish", lambda s, code: ("login", None, {"email": "d2@x.com", "name": "D"}))
+    assert c.get("/auth/google/callback?state=s&code=x", follow_redirects=False).headers["location"].startswith("/studio#token=")
+    assert not saved                                                                          # Drive unticked: signed in, not connected
+
+
 def test_drive_follows_license_change():
     h = login("mv@x.com"); lid_free = db.session_user(h["Authorization"][7:])["license_id"]
     with db.connect() as con:

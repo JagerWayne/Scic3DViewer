@@ -28,3 +28,24 @@ details.sec>div{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
 .hidden{display:none!important}
 #toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:60;padding:8px 14px;border-radius:10px;background:#1e293b;border:1px solid #475569}
 @media (max-width:768px){#panel{top:auto!important;height:45vh;width:100%!important;border-radius:16px 16px 0 0}#panel.closed{height:0;overflow:hidden}}
+.modal-card{max-height:92vh;overflow-y:auto}
+@media (max-width:768px){
+  /* a dialog hides everything behind it: the settings sheet, the tool column and the tour bar */
+  body.modal-open #panel,body.modal-open #tools,body.modal-open #tour{display:none!important}
+  /* dialogs become bottom sheets with thumb-sized controls */
+  [id$="Modal"]{align-items:flex-end!important;padding:0!important}
+  .modal-card{max-width:none!important;width:100%!important;border-radius:20px 20px 0 0!important;max-height:92dvh;padding:18px 16px calc(16px + env(safe-area-inset-bottom))!important}
+  .modal-card input:not([type=checkbox]):not([type=color]),.modal-card select,.modal-card textarea{font-size:16px;min-height:46px} /* 16px stops iOS zooming into fields */
+  .modal-card input[type=checkbox]{width:22px;height:22px;flex:none}
+  .modal-card label.text-sm{display:flex;align-items:center;gap:10px;min-height:44px}
+  .modal-card .btn{min-height:46px;font-size:15px;padding:8px 14px}
+  /* the Close / Publish row stays visible while the form scrolls, buttons share the width */
+  .modal-card>.row:last-child{position:sticky;bottom:calc(-16px - env(safe-area-inset-bottom));gap:10px;padding:10px 0 4px;background:rgba(15,23,42,.97)}
+  .modal-card>.row:last-child .btn{flex:1}
+  #sResult .flex.gap-2{flex-wrap:wrap} #sResult #sUrl{min-width:0;flex:1 1 100%}
+  #sResult .btn{flex:1}
+  /* My projects: one card per project instead of a wide table */
+  #projRows tr{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.1)}
+  #projRows td{display:block;text-align:left!important;white-space:normal!important;padding:0!important}
+  #projRows td:last-child{display:flex;flex-wrap:wrap;gap:6px} #projRows td:last-child .btn{flex:1 1 40%;min-height:42px;margin:0!important}
+}

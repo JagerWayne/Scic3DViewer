@@ -126,8 +126,9 @@
     <h2 class="text-lg font-bold">Welcome to Scic3DViewer Studio</h2>
     <p class="text-sm text-slate-300">Sign in with your Google account. If you bought a Pro or Enterprise license, use the Google account with the email it was issued to: it unlocks automatically.</p>
     <p class="text-xs text-red-400 hidden" id="authErr"></p>
+    <p class="text-sm text-slate-300">Google will also ask you to allow <b>Google Drive</b>: your shared models are saved in <b>your own Drive</b>, and only in files this app creates. Keep that box ticked to be able to publish links.</p>
     <a href="/auth/google/login" class="btn btn-p text-center py-2">Sign in with Google</a>
-    <p class="text-xs text-slate-400">We only read your name and email address. By signing in you agree to the <a class="underline text-sky-400" href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the <a class="underline text-sky-400" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+    <p class="text-xs text-slate-400">We read your name and email address; Drive access is limited to the files this app creates. By signing in you agree to the <a class="underline text-sky-400" href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the <a class="underline text-sky-400" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
   </div>
 </div>
 
@@ -147,7 +148,7 @@
     <label class="text-sm hidden" id="sUpdateRow"><input type="checkbox" id="sUpdate" checked> Update the existing link (same address) <span class="text-xs text-slate-400" id="sEditing"></span></label>
     <p class="text-xs text-amber-400 hidden" id="sNote"></p>
     <div id="sResult" class="hidden flex flex-col gap-2">
-      <div class="flex gap-2"><input class="inp" id="sUrl" readonly><button class="btn" id="sCopy">Copy</button></div>
+      <div class="flex gap-2"><input class="inp" id="sUrl" readonly><button class="btn" id="sCopy">Copy</button><button class="btn btn-p hidden" id="sNative">Share…</button></div>
       <div class="flex gap-3 items-start"><img id="sQr" alt="QR code of the link" class="rounded bg-white p-1 hidden" width="110" height="110">
         <div class="flex-1 flex flex-col gap-1"><span class="text-xs text-slate-400">Embed on a website</span><textarea class="inp text-xs" id="sEmbed" rows="3" readonly></textarea><button class="btn" id="sCopyEmbed">Copy embed code</button></div></div>
     </div>
