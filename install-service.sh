@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 [ -x .venv/bin/uvicorn ] || ./setup.sh
-if grep -q 'example.com' .env 2>/dev/null; then
+if [ ! -f .env ] || grep -Eq '^SCIC_BASE_URL=.*example\.com' .env; then  # only the real setting counts, not the commented examples
   echo "Edit .env first: SCIC_BASE_URL still has the example domain (nano .env), then run this again."; exit 1
 fi
 sudo cp scic3d.service /etc/systemd/system/scic3d.service
