@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect your Google Drive</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  html,body{overflow:auto;height:auto}
+  main{max-width:760px;margin:0 auto;padding:24px 16px 64px;line-height:1.6}
+  h1{font-size:26px;margin:0 0 6px} h2{font-size:18px;margin:32px 0 8px;color:#7dd3fc}
+  ol,ul{padding-left:22px} li{margin:6px 0}
+  .box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px 16px;margin:12px 0}
+  a{color:#38bdf8} code{background:rgba(255,255,255,.1);padding:1px 6px;border-radius:6px}
+  table{width:100%;border-collapse:collapse;font-size:14px} td,th{border:1px solid rgba(255,255,255,.15);padding:8px;text-align:left;vertical-align:top}
+  th{background:rgba(255,255,255,.08)}
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/studio">&larr; Back to the Studio</a></p>
+  <h1>Connect your Google Drive</h1>
+  <p>When you click <b>Share link</b>, your 3D model is saved in <b>your own Google Drive</b>, in a folder called
+  <code>Scic3DViewer</code>. People who open your link see the model; they never get access to your Drive.
+  You only connect once. It takes about one minute and needs no technical knowledge.</p>
+
+  <div class="box"><b>What you need:</b> a Google account (a normal Gmail address is fine), internet access, and a little free space in your Drive (15 GB are free on personal accounts).</div>
+
+  <h2>Step by step</h2>
+  <ol>
+    <li>If you have not yet, click <b>Sign in with Google</b> in the Studio and choose your account. (Pro or Enterprise customers: use the Google account with the email your license was issued to; it unlocks automatically.)</li>
+    <li>In the Studio, click <b>Connect Drive</b> in the top bar. (Clicking <b>Share link</b> before you connect opens the same window.)</li>
+    <li>In the window that opens, click <b>Connect Google Drive</b>. Your browser goes to a Google page.</li>
+    <li><b>Choose your Google account</b> from the list (or sign in). Use the account whose Drive should hold your models.</li>
+    <li>You may see the warning <b>&ldquo;Google hasn&rsquo;t verified this app&rdquo;</b>. This is normal for small independent sites.
+      Click <b>Advanced</b> (small grey text), then click <b>Go to &hellip; (unsafe)</b>.</li>
+    <li>Google shows the permission being requested:
+      <i>&ldquo;See, edit, create and delete only the specific Google Drive files you use with this app.&rdquo;</i>
+      That means this site can only touch files <b>it creates itself</b>, never your other files or photos.
+      Tick the box if there is one, then click <b>Continue</b> (or <b>Allow</b>).</li>
+    <li>You return to the Studio automatically and see <b>&ldquo;Google Drive connected&rdquo;</b>.
+      The top-bar button now reads <b>Drive &#10003;</b>.</li>
+  </ol>
+  <div class="box">That&rsquo;s it. Now click <b>Share link &rarr; Publish</b>. The model is saved in your Drive and you get a link to send to anyone.</div>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li><b>Privacy:</b> the files are private to your Drive. Nobody can open them from Drive; only this site can read them and shows them to people who have your link.</li>
+    <li><b>Please don&rsquo;t delete or rename</b> the files inside the <code>Scic3DViewer</code> folder by hand. The matching link would stop working.
+      To remove a link properly, delete it in the Studio; it also removes the file from your Drive.</li>
+    <li><b>Disconnecting:</b> open <b>Connect Drive</b> &rarr; <b>Disconnect</b>. <b>All your existing links stop working</b> until you connect again.
+      You can also remove access at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a> (same effect).</li>
+    <li><b>Different Google account:</b> Disconnect, then connect again and choose the other account. Links you made before will need to be published again.</li>
+    <li><b>Storage:</b> your models use your own Drive space, not the site&rsquo;s.</li>
+  </ul>
+
+  <h2>Something went wrong?</h2>
+  <table>
+    <tr><th>What you see</th><th>What to do</th></tr>
+    <tr><td><b>&ldquo;Google Drive is not enabled on this site yet&rdquo;</b></td>
+      <td>The person who runs this site has not finished its one-time Google setup. Ask them to do it; you cannot fix this yourself.</td></tr>
+    <tr><td>Google page: <b>Error 403: access_denied</b> or &ldquo;app not verified / not allowed&rdquo; with no Advanced option</td>
+      <td>The site owner still has to allow your account. Send them your Gmail address and ask them to add you (or to publish the Google app).</td></tr>
+    <tr><td><b>&ldquo;Could not connect Google Drive, please try again&rdquo;</b></td>
+      <td>Click <b>Connect Google Drive</b> again and finish within a few minutes, pressing <b>Continue</b> on Google&rsquo;s page. Do not press Cancel or Back.</td></tr>
+    <tr><td>The warning page has no <b>Advanced</b> link</td>
+      <td>Use a normal browser window with a personal Gmail account (work or school accounts may block it).</td></tr>
+    <tr><td><b>&ldquo;Connect your Google Drive first&rdquo;</b> when sharing</td>
+      <td>Connect (steps above). Do this too if you removed access at Google.</td></tr>
+    <tr><td><b>&ldquo;Upload to your Google Drive failed&rdquo;</b></td>
+      <td>Check your internet connection and that your Drive is not full. If it keeps failing: <b>Connect Drive &rarr; Disconnect</b>, then connect again.</td></tr>
+    <tr><td>Visitors see <b>&ldquo;This model is temporarily unavailable&rdquo;</b></td>
+      <td>Your Drive was disconnected or the file was deleted. Reconnect Drive; if the file is gone, publish the model again.</td></tr>
+  </table>
+
+  <p style="margin-top:32px;font-size:12px;color:#94a3b8">Running this site yourself? The one-time owner setup is in <code>GOOGLE_DRIVE_SETUP.md</code> (Part A).</p>
+</main>
+</body>
+</html>

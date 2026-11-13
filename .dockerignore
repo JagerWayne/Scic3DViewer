@@ -1,0 +1,9 @@
+.venv
+data
+backups
+tests
+__pycache__
+*.pyc
+credentials.json
+token.json
+.env

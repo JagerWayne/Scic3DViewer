@@ -1,0 +1,7 @@
+# /etc/caddy/Caddyfile on the Ubuntu server. Replace the domain; Caddy gets and renews the HTTPS certificate by itself.
+3d.example.com {
+	request_body {
+		max_size 520MB   # Enterprise uploads go up to 500 MB
+	}
+	reverse_proxy 127.0.0.1:6711
+}

@@ -1,0 +1,31 @@
+# Production: app + Caddy (automatic HTTPS). Put your settings in a file named .env next to this one (see DEPLOY.md).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      SCIC_BASE_URL: https://${DOMAIN:?set DOMAIN in .env}
+      SCIC_ADMIN_EMAIL: ${ADMIN_EMAIL:-waynescicluna.1985@gmail.com}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      SCIC_PRICES: ${SCIC_PRICES:-}
+    volumes:
+      - ./data:/data
+      - ./credentials.json:/app/credentials.json:ro
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+volumes:
+  caddy_data:

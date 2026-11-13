@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scic3D Admin</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
+<style>
+  html,body{overflow:auto;height:auto}
+  .card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:14px 16px}
+  .tab{padding:8px 14px;border-radius:10px;cursor:pointer;color:#cbd5e1;background:transparent;border:0;font-size:14px}
+  .tab.on{background:#0ea5e9;color:#fff}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:#94a3b8;font-weight:600;padding:8px;border-bottom:1px solid rgba(255,255,255,.12);white-space:nowrap}
+  td{padding:8px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:middle}
+  tr:hover td{background:rgba(255,255,255,.03)}
+  .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11px;font-weight:700}
+  .p-active{background:#16a34a33;color:#4ade80}.p-pending{background:#0ea5e933;color:#38bdf8}.p-expired{background:#f59e0b33;color:#fbbf24}
+  .p-revoked{background:#ef444433;color:#f87171}.p-free{background:#64748b44;color:#cbd5e1}
+  .bar{display:flex;align-items:flex-end;gap:6px;height:120px}
+  .bar>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px;min-width:0}
+  .seg{width:100%;border-radius:3px 3px 0 0}
+  .scroll{overflow-x:auto}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+</style>
+</head>
+<body>
+<div class="max-w-6xl mx-auto p-4 md:p-6">
+  <header class="flex flex-wrap items-center gap-3 mb-4">
+    <h1 class="text-xl font-bold">Scic3D Admin</h1>
+    <span class="flex-1"></span>
+    <span class="text-xs text-slate-400" id="me"></span>
+    <a class="btn" href="/studio">Studio</a>
+  </header>
+
+  <div id="gate" class="card hidden text-center py-10"></div>
+
+  <div id="app" class="hidden">
+    <nav class="flex flex-wrap gap-1 mb-4" id="tabs">
+      <button class="tab on" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="licenses">Licenses</button>
+      <button class="tab" data-tab="shares">Shared links</button>
+      <button class="tab" data-tab="activity">Activity</button>
+    </nav>
+
+    <section id="t-overview">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="cards"></div>
+      <div class="grid md:grid-cols-3 gap-3 mt-3">
+        <div class="card md:col-span-2">
+          <div class="flex items-center justify-between mb-2"><b class="text-sm">Last 14 days</b>
+            <span class="text-xs text-slate-400"><span class="dot" style="background:#38bdf8"></span>logins <span class="dot ml-2" style="background:#4ade80"></span>shares <span class="dot ml-2" style="background:#fbbf24"></span>views</span></div>
+          <div class="bar" id="chart"></div>
+        </div>
+        <div class="card"><b class="text-sm">System</b><div id="system" class="mt-2 flex flex-col gap-2 text-sm"></div></div>
+      </div>
+    </section>
+
+    <section id="t-licenses" class="hidden">
+      <div class="flex flex-wrap gap-2 mb-3">
+        <input class="inp" id="lq" placeholder="Search name or email" style="max-width:260px">
+        <select class="inp" id="lstatus" style="max-width:160px"><option value="">All statuses</option><option>active</option><option>pending</option><option>expired</option><option>revoked</option><option>free</option></select>
+        <span class="flex-1"></span>
+        <button class="btn btn-p" id="newLic">+ New license</button>
+      </div>
+      <div class="card scroll"><table><thead><tr><th>Person</th><th>Email</th><th>Tier</th><th>Status</th><th>Expires</th><th>Drive</th><th>Links</th><th>Actions</th></tr></thead><tbody id="lrows"></tbody></table></div>
+      <p class="text-xs text-slate-400 mt-2">Free accounts are created automatically when someone signs in and are not editable. A license applies when its email signs in with Google; the duration starts at that first sign-in.</p>
+    </section>
+
+    <section id="t-shares" class="hidden">
+      <div class="card scroll"><table><thead><tr><th>Title</th><th>Owner</th><th>Created</th><th>Views</th><th>Status</th><th>Actions</th></tr></thead><tbody id="srows"></tbody></table></div>
+    </section>
+
+    <section id="t-activity" class="hidden">
+      <div class="flex gap-2 mb-3"><input class="inp" id="aq" placeholder="Filter by action, email or detail" style="max-width:320px"><button class="btn" id="aref">Refresh</button></div>
+      <div class="card scroll"><table><thead><tr><th>Time</th><th>Action</th><th>Who</th><th>IP</th><th>Detail</th></tr></thead><tbody id="arows"></tbody></table></div>
+    </section>
+  </div>
+</div>
+
+<div id="licModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <form id="licForm" class="glass rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
+    <h2 class="text-lg font-bold">New license</h2>
+    <div class="grid grid-cols-2 gap-2">
+      <label class="text-xs">Name<input class="inp" id="fName" required maxlength="80"></label>
+      <label class="text-xs">Surname<input class="inp" id="fSurname" required maxlength="80"></label>
+    </div>
+    <label class="text-xs">Google email of the customer<input class="inp" id="fEmail" type="email" required maxlength="200"></label>
+    <div class="grid grid-cols-3 gap-2">
+      <label class="text-xs col-span-1">Tier<select class="inp" id="fTier"><option>PRO</option><option>ENTERPRISE</option><option>FREE</option></select></label>
+      <label class="text-xs col-span-1">Duration<input class="inp" id="fDur" type="number" min="1" max="9999" value="1" required></label>
+      <label class="text-xs col-span-1">Unit<select class="inp" id="fUnit"><option value="d">days</option><option value="m">months</option><option value="y" selected>years</option></select></label>
+    </div>
+    <p class="text-xs text-slate-400">The duration starts the first time the customer signs in.</p>
+    <label class="text-sm flex items-center gap-2"><input type="checkbox" id="fMail"> Email the customer <span class="text-xs text-slate-400" id="fMailNote"></span></label>
+    <p class="text-xs text-red-400 hidden" id="fErr"></p>
+    <p class="text-xs text-emerald-400 hidden" id="fOk"></p>
+    <div class="flex justify-between"><button type="button" class="btn" id="fClose">Close</button><button class="btn btn-p">Create license</button></div>
+  </form>
+</div>
+<div id="toast" class="hidden"></div>
+<script type="module" src="/static/js/admin.js"></script>
+</body>
+</html>

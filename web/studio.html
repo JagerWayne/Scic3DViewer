@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scic3D Studio</title>
+<link rel="stylesheet" href="/static/app.css">
+<script type="importmap" nonce="{{NONCE}}">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","qrcode-generator":"https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm"}}
+</script>
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
+</head>
+<body>
+<div id="stage"></div>
+
+<header class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-2 px-3 overflow-x-auto whitespace-nowrap">
+  <b class="mr-2">Scic3D Studio</b>
+  <button class="btn" id="open">Open model</button>
+  <button class="btn" id="add" data-need="assembly">Add model</button>
+  <input type="file" id="file" accept=".glb,.gltf,.obj,.stl,.fbx,.3mf,.step,.stp" multiple class="hidden">
+  <button class="btn" id="projects">My projects</button>
+  <button class="btn" id="drive">Google Drive</button>
+  <button class="btn hidden" id="upgrade">Upgrade</button>
+  <a class="btn hidden" id="adminLink" href="/admin">Admin</a>
+  <button class="btn btn-p" id="share">Share link</button>
+  <button class="btn" id="export">Export…</button>
+  <span class="flex-1"></span>
+  <span class="text-xs text-slate-400" id="tris"></span>
+  <span class="lock" id="tier"></span>
+  <span class="text-xs text-slate-300" id="who"></span>
+  <button class="btn" id="signout">Sign out</button>
+  <button class="btn md:hidden" id="panelBtn">Panel</button>
+</header>
+
+<nav id="tools" class="fixed left-3 top-16 glass rounded-xl p-1 z-20 flex flex-col gap-1">
+  <button class="btn on" data-mode="select" title="Select / orbit">Select</button>
+  <button class="btn" data-mode="brush" title="Paint brush">Brush</button>
+  <button class="btn" data-mode="fill" data-need="paint_fill" title="Edge-aware fill">Fill</button>
+  <button class="btn" data-mode="annotate" title="Add callout">Callout</button>
+  <button class="btn" data-mode="ruler" data-need="measure" title="Ruler">Ruler</button>
+  <button class="btn" data-mode="angle" data-need="measure" title="Angle">Angle</button>
+  <button class="btn" data-mode="thickness" data-need="measure" title="Wall thickness">Thick</button>
+  <hr class="border-white/10">
+  <button class="btn" data-gizmo="translate" data-need="assembly" title="Move (W)">Move</button>
+  <button class="btn" data-gizmo="rotate" data-need="assembly" title="Rotate (E)">Rot</button>
+  <button class="btn" data-gizmo="scale" data-need="assembly" title="Scale (R)">Scale</button>
+</nav>
+
+<aside id="panel" class="fixed right-0 top-12 bottom-0 w-80 glass z-20 overflow-y-auto">
+  <details class="sec" open><summary>Parts outliner</summary><div>
+    <div id="outliner" class="max-h-52 overflow-y-auto"></div>
+    <div class="row"><button class="btn" id="merge" data-need="assembly">Merge all</button><span class="text-xs text-slate-400">dbl-click name to rename</span></div>
+  </div></details>
+
+  <details class="sec"><summary>Stage</summary><div>
+    <div class="row"><label for="backdrop">Backdrop</label><select id="backdrop" class="inp" style="width:140px"></select></div>
+    <div class="row"><label for="grid">Floor grid</label><input type="checkbox" id="grid" checked></div>
+    <div class="row"><label for="light">Lights</label><input type="range" id="light" min="0" max="2" step=".05" value="1"></div>
+    <div class="row"><label for="lpreset">Lighting</label><select id="lpreset" class="inp" style="width:140px"><option value="studio">Studio</option><option value="soft">Soft</option><option value="dramatic">Dramatic</option><option value="flat">Flat</option></select></div>
+    <div class="row"><label for="shadows">Soft shadow</label><input type="checkbox" id="shadows" checked></div>
+  </div></details>
+
+  <details class="sec"><summary>Material &amp; reflections</summary><div>
+    <div class="row"><label for="rough">Roughness</label><input type="range" id="rough" min="0" max="1" step=".01" value=".5"></div>
+    <div class="row"><label for="metal">Metalness</label><input type="range" id="metal" min="0" max="1" step=".01" value="0"></div>
+    <div class="row"><label for="env">Environment</label>
+      <select id="env" class="inp" style="width:140px"><option value="softbox">Softbox Studio</option><option value="showroom">Showroom</option><option value="daylight">Daylight Sky</option><option value="none">None</option></select></div>
+    <div class="row"><label for="envI">Reflection</label><input type="range" id="envI" min="0" max="3" step=".05" value="1"></div>
+    <div data-need="hdri" class="row"><label for="hdr">Custom .HDR</label><input type="file" id="hdr" accept=".hdr" class="text-xs w-40"></div>
+  </div></details>
+
+  <details class="sec"><summary>Paint</summary><div>
+    <div class="row"><label for="pcolor">Color</label><input type="color" id="pcolor" value="#ef4444"></div>
+    <div class="row"><label for="pradius">Brush radius</label><input type="range" id="pradius" min=".01" max=".6" step=".01" value=".12"></div>
+    <div class="row" data-need="paint_fill"><label for="pangle">Crease angle <span id="pangleV">30°</span></label><input type="range" id="pangle" min="5" max="180" step="1" value="30"></div>
+    <div class="row"><button class="btn" id="undo" data-need="paint_undo">Undo</button><button class="btn" id="reset">Reset colors</button></div>
+  </div></details>
+
+  <details class="sec"><summary>Cross-section</summary><div data-need="slicer">
+    <div class="row"><label for="clipOn">Z clipping plane</label><input type="checkbox" id="clipOn"></div>
+    <div class="row"><label for="clipZ">Position</label><input type="range" id="clipZ" min="-1" max="1" step=".01" value="1"></div>
+  </div></details>
+
+  <details class="sec"><summary>Exploded view</summary><div data-need="explode">
+    <div class="row"><label for="explode">Explode</label><input type="range" id="explode" min="0" max="100" step="1" value="0"></div>
+    <p class="text-xs text-slate-400" id="explodeNote"></p>
+  </div></details>
+
+  <details class="sec"><summary>Measure</summary><div data-need="measure">
+    <div class="row"><label for="unit">Unit</label><select id="unit" class="inp" style="width:110px"><option>units</option><option>mm</option><option>cm</option><option>in</option></select></div>
+    <div class="row"><label for="uscale">Scale factor</label><input type="number" id="uscale" class="inp" value="1" min="0.0001" step="any" style="width:110px"></div>
+    <button class="btn" id="clearDims">Clear measurements</button>
+    <p class="text-xs text-slate-400">Ruler: 2 points. Angle: 2 faces. Thick: 1 point.</p>
+  </div></details>
+
+  <details class="sec"><summary>Callouts</summary><div>
+    <p class="text-xs text-slate-400">Pick “Callout”, then click the model. Hover a callout to spotlight it.</p>
+    <div id="annoList" class="flex flex-col gap-1"></div>
+  </div></details>
+
+  <details class="sec"><summary>Pedestal</summary><div data-need="base">
+    <div class="row"><label for="bshape">Shape</label><select id="bshape" class="inp" style="width:130px"><option value="cylinder">Cylinder</option><option value="beveled">Beveled</option><option value="square">Square</option></select></div>
+    <div class="row"><label for="bfinish">Finish</label><select id="bfinish" class="inp" style="width:130px"><option value="slate">Slate</option><option value="steel">Steel</option><option value="glass">Glass</option><option value="obsidian">Obsidian</option></select></div>
+    <div class="row"><label for="bradius">Radius</label><input type="range" id="bradius" min=".3" max="3" step=".05" value="1.3"></div>
+    <div class="row"><label for="bheight">Height</label><input type="range" id="bheight" min=".05" max="1" step=".01" value=".15"></div>
+    <div class="row"><button class="btn btn-p" id="bapply">Apply</button><button class="btn" id="bbake">Bake into model</button><button class="btn" id="bremove">Remove</button></div>
+  </div></details>
+
+  <details class="sec"><summary>Optimize mesh</summary><div data-need="decimate">
+    <div class="row"><label for="keep">Keep <span id="keepV">50%</span></label><input type="range" id="keep" min="5" max="95" step="5" value="50"></div>
+    <div class="row"><button class="btn btn-p" id="decimate">Simplify</button><button class="btn" id="revert">Revert</button></div>
+    <p class="text-xs text-slate-400" id="optNote"></p>
+  </div></details>
+
+  <details class="sec"><summary>Capture</summary><div data-need="capture">
+    <div class="row"><button class="btn" id="png">Transparent PNG</button><button class="btn" id="webm">360° WebM</button></div>
+  </div></details>
+</aside>
+
+<div id="tour"></div>
+<div id="toast" class="hidden"></div>
+
+<div id="authModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div id="authForm" class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-3">
+    <h2 class="text-lg font-bold">Welcome to Scic3D Studio</h2>
+    <p class="text-sm text-slate-300">Sign in with your Google account. If you bought a Pro or Enterprise license, use the Google account with the email it was issued to: it unlocks automatically.</p>
+    <p class="text-xs text-red-400 hidden" id="authErr"></p>
+    <a href="/auth/google/login" class="btn btn-p text-center py-2">Sign in with Google</a>
+    <p class="text-xs text-slate-400">We only read your name and email address.</p>
+  </div>
+</div>
+
+<div id="shareModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
+    <h2 class="text-lg font-bold">Share link</h2>
+    <label class="text-xs">Title<input class="inp" id="sTitle" maxlength="120" value="Untitled"></label>
+    <fieldset class="flex flex-col gap-2 text-sm" id="sPerms">
+      <label><input type="checkbox" id="pDl"> Allow multi-format 3D download</label>
+      <label><input type="checkbox" id="pMeasure"> Enable ruler &amp; angle/thickness caliper</label>
+      <label><input type="checkbox" id="pExplode"> Enable exploded view slider</label>
+    </fieldset>
+    <div class="grid grid-cols-2 gap-2">
+      <label class="text-xs">Link expires<select class="inp" id="sExpiry"><option value="0">Never</option><option value="1">After 1 day</option><option value="7">After 7 days</option><option value="30">After 30 days</option><option value="90">After 90 days</option><option value="365">After 1 year</option></select></label>
+      <label class="text-xs">Password (optional)<input class="inp" id="sPass" type="password" maxlength="64" autocomplete="new-password" placeholder="min. 4 characters"></label>
+    </div>
+    <label class="text-sm hidden" id="sUpdateRow"><input type="checkbox" id="sUpdate" checked> Update the existing link (same address) <span class="text-xs text-slate-400" id="sEditing"></span></label>
+    <p class="text-xs text-amber-400 hidden" id="sNote"></p>
+    <div id="sResult" class="hidden flex flex-col gap-2">
+      <div class="flex gap-2"><input class="inp" id="sUrl" readonly><button class="btn" id="sCopy">Copy</button></div>
+      <div class="flex gap-3 items-start"><img id="sQr" alt="QR code of the link" class="rounded bg-white p-1 hidden" width="110" height="110">
+        <div class="flex-1 flex flex-col gap-1"><span class="text-xs text-slate-400">Embed on a website</span><textarea class="inp text-xs" id="sEmbed" rows="3" readonly></textarea><button class="btn" id="sCopyEmbed">Copy embed code</button></div></div>
+    </div>
+    <p class="text-xs text-red-400 hidden" id="sErr"></p>
+    <div class="row"><button class="btn" id="sClose">Close</button><button class="btn btn-p" id="sGo">Publish</button></div>
+  </div>
+</div>
+
+<div id="driveModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
+    <h2 class="text-lg font-bold">Your Google Drive</h2>
+    <p class="text-sm text-slate-300">Shared models are saved in <b>your own</b> Google Drive, in a folder called <b>Scic3DViewer</b>. This site can only see the files it creates there, never your other files.</p>
+    <p class="text-sm" id="driveState"></p>
+    <ol class="text-xs text-slate-400 list-decimal pl-5 flex flex-col gap-1" id="driveHelp">
+      <li>Click <b>Connect Google Drive</b>. You will go to Google.</li>
+      <li>Choose your Google account.</li>
+      <li>If Google says "this app isn't verified", click <b>Advanced</b>, then <b>Go to … (unsafe)</b>. This is expected for small sites.</li>
+      <li>Click <b>Continue</b> / <b>Allow</b>. You come back here automatically.</li>
+    </ol>
+    <a href="/help/drive" target="_blank" rel="noopener" class="text-xs text-sky-400 underline">Open the full step-by-step guide (with troubleshooting)</a>
+    <p class="text-xs text-amber-400 hidden" id="driveWarn">Disconnecting stops all of your existing share links from loading until you connect again.</p>
+    <div class="row"><button class="btn" id="driveClose">Close</button><button class="btn btn-p" id="driveGo">Connect Google Drive</button></div>
+  </div>
+</div>
+
+<div id="projectsModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-3xl max-h-[85vh] flex flex-col gap-3">
+    <div class="row"><h2 class="text-lg font-bold">My projects</h2><button class="btn" id="projClose">Close</button></div>
+    <div class="overflow-auto"><table class="w-full text-sm"><tbody id="projRows"></tbody></table></div>
+    <p class="text-xs text-slate-400" id="projEmpty"></p>
+  </div>
+</div>
+
+<div id="upgradeModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-2">
+    <h2 class="text-lg font-bold">Upgrade your license</h2>
+    <p class="text-xs text-slate-400">You pay on Stripe's secure page. Your license unlocks automatically for your Google account.</p>
+    <div id="planList" class="flex flex-col gap-2"></div>
+    <button class="btn" id="upClose">Close</button>
+  </div>
+</div>
+
+<div id="exportModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-xs flex flex-col gap-2">
+    <h2 class="text-lg font-bold">Export model</h2>
+    <button class="btn" data-fmt="glb">.GLB</button><button class="btn" data-fmt="obj">.OBJ</button><button class="btn" data-fmt="stl">.STL</button><button class="btn" data-fmt="usdz">.USDZ (iPhone AR)</button>
+    <p class="text-xs text-amber-400" id="exNote"></p>
+    <button class="btn" id="exClose">Close</button>
+  </div>
+</div>
+
+<script type="module" src="/static/js/studio.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Secrets and private data: never commit these
+credentials.json
+token.json
+.env
+data/
+backups/
+*.tgz
+
+# Environments and caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

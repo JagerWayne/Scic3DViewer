@@ -1,0 +1,26 @@
+# systemd unit for Scic3D. Installed by install-service.sh to /etc/systemd/system/scic3d.service
+[Unit]
+Description=Scic3D viewer and studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=wayne
+WorkingDirectory=/home/wayne/python/s3dv
+EnvironmentFile=/home/wayne/python/s3dv/.env
+# Listens on localhost only; Caddy (Caddyfile.ubuntu) is the public HTTPS front.
+ExecStart=/home/wayne/python/s3dv/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 6711 --proxy-headers
+Restart=on-failure
+RestartSec=3
+
+# Hardening: the service can write only inside its own folder
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/wayne/python/s3dv
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

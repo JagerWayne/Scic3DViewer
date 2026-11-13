@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D Viewer</title>
+<link rel="stylesheet" href="/static/app.css">
+<script type="importmap" nonce="{{NONCE}}">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
+</head>
+<body>
+<div id="stage"></div>
+
+<header class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-2 px-3">
+  <b id="title" class="truncate">Loading…</b>
+  <span class="flex-1"></span>
+  <span id="dl" class="hidden flex items-center gap-1"><span class="text-xs text-slate-400">Download</span></span>
+  <button class="btn" id="rotate" title="Auto-rotate">Rotate</button>
+  <button class="btn" id="full" title="Fullscreen">Fullscreen</button>
+  <button class="btn" id="panelBtn">Parts</button>
+</header>
+
+<nav id="tools" class="hidden fixed left-3 top-16 glass rounded-xl p-1 z-20 flex flex-col gap-1">
+  <button class="btn on" data-mode="select">Orbit</button>
+  <button class="btn" data-mode="ruler">Ruler</button>
+  <button class="btn" data-mode="angle">Angle</button>
+  <button class="btn" data-mode="thickness">Thick</button>
+</nav>
+
+<aside id="panel" class="fixed right-0 top-12 bottom-0 w-72 glass z-20 overflow-y-auto">
+  <details class="sec" open><summary>Parts</summary><div><div id="outliner" class="max-h-64 overflow-y-auto"></div></div></details>
+  <details class="sec hidden" id="secExplode" open><summary>Exploded view</summary><div>
+    <div class="row"><label for="explode">Explode</label><input type="range" id="explode" min="0" max="100" step="1" value="0"></div>
+  </div></details>
+  <details class="sec hidden" id="secMeasure"><summary>Measure</summary><div>
+    <div class="row"><label for="unit">Unit</label><select id="unit" class="inp" style="width:110px"><option>units</option><option>mm</option><option>cm</option><option>in</option></select></div>
+    <div class="row"><label for="uscale">Scale factor</label><input type="number" id="uscale" class="inp" value="1" min="0.0001" step="any" style="width:110px"></div>
+    <button class="btn" id="clearDims">Clear</button>
+  </div></details>
+</aside>
+
+<div id="tour"></div>
+<div id="toast" class="hidden"></div>
+<div id="pwModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+  <form id="pwForm" class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-3">
+    <h2 class="text-lg font-bold">This link is password protected</h2>
+    <input class="inp" id="pwInput" type="password" autocomplete="off" required maxlength="64" aria-label="Password">
+    <p class="text-xs text-red-400 hidden" id="pwErr">Wrong password, try again.</p>
+    <button class="btn btn-p">Open</button>
+  </form>
+</div>
+<div id="err" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-lg"></div>
+
+<script type="module" src="/static/js/viewer.js"></script>
+</body>
+</html>
