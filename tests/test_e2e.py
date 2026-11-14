@@ -443,18 +443,47 @@ def test_callouts_follow_their_part_and_undo_redo_work(server):
         browser.close()
 
 
+def drag_rotate_ring(page, pre_deg, steps=14):
+    """Press the rotate gizmo with the real mouse and drag along it; returns the part's angles in degrees."""
+    import math
+    page.evaluate("pre => { const p = stage.assembly.children[0]; p.rotation.set(0, pre * Math.PI / 180, 0); p.updateMatrixWorld(true); stage.select(p); stage.setGizmoMode('rotate'); }", pre_deg)
+    page.wait_for_timeout(300)
+    c = page.evaluate("""() => { const V = stage.camera.position.constructor, v = new V(0, 1, 0).project(stage.camera), r = stage.renderer.domElement.getBoundingClientRect();
+        return [r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height]; }""")
+    for rad in range(60, 260, 6):
+        for a in range(0, 360, 12):
+            page.mouse.move(c[0] + rad * math.cos(math.radians(a)), c[1] + rad * math.sin(math.radians(a)))
+            if page.evaluate("stage.tc.axis") in ("X", "Y", "Z"):
+                page.mouse.down()
+                for k in range(1, steps + 1):
+                    t = math.radians(a + k * 4)
+                    page.mouse.move(c[0] + rad * math.cos(t), c[1] + rad * math.sin(t))
+                rot = page.evaluate("(() => { const r = stage.assembly.children[0].rotation, d = 180 / Math.PI; return [r.x * d, r.y * d, r.z * d]; })()")
+                page.mouse.up()
+                return rot
+    raise AssertionError("the rotate gizmo was not found under the mouse")
+
+
 def test_rotation_snapping(server):
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
         page = open_studio(browser, "snap@x.com")
-        snap = lambda: page.evaluate("stage.tc.rotationSnap")
-        assert snap() is None                                                             # off by default
-        page.click("#snapBtn"); assert abs(snap() - 3.14159265 / 12) < 1e-4               # 15 degrees
+        assert page.evaluate("stage.snap.on") is False
+        page.click("#snapBtn"); assert page.evaluate("stage.snap") == {"on": True, "deg": 15}
         assert page.evaluate("stage.tc.translationSnap") == 0.1
-        page.select_option("#snapDeg", "45"); assert abs(snap() - 3.14159265 / 4) < 1e-4
-        page.keyboard.press("s"); assert snap() is None                                   # S toggles it
-        page.click("[data-menu=edit]"); page.click("#mSnap"); assert abs(snap() - 3.14159265 / 4) < 1e-4
+        page.select_option("#snapDeg", "45"); assert page.evaluate("stage.snap.deg") == 45
+        page.keyboard.press("s"); assert page.evaluate("stage.snap.on") is False         # S toggles it
+        page.click("[data-menu=edit]"); page.click("#mSnap"); assert page.evaluate("stage.snap.on") is True
         assert page.locator("#snapBtn").get_attribute("aria-pressed") == "true"
+        page.select_option("#snapDeg", "15")
+        near = lambda deg: abs(deg / 15 - round(deg / 15)) < 1e-3                          # a multiple of 15 degrees
+        from_aligned = drag_rotate_ring(page, 0)
+        assert all(near(v) for v in from_aligned) and any(abs(v) > 1 for v in from_aligned), from_aligned
+        from_off_grid = drag_rotate_ring(page, 10)                                          # a part that already sits at 10 degrees
+        assert all(near(v) for v in from_off_grid), from_off_grid                          # still ends up on the grid, not at 25, 40...
+        page.click("#snapBtn"); assert page.evaluate("stage.snap.on") is False             # off: free rotation again
+        free = drag_rotate_ring(page, 10)
+        assert not all(near(v) for v in free), free
         browser.close()
 
 

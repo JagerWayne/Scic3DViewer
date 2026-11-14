@@ -90,6 +90,7 @@ export class Stage extends EventTarget {
       }
     });
     this.tc.addEventListener('change', () => this.emit('change'));
+    this.tc.addEventListener('objectChange', () => this._snapRotation());
 
     this.state = { rough: .5, metal: 0, touched: false, env: 'softbox', envI: 1, clipOn: false, clipC: 0, explode: 0, light: 1, backdrop: 'midnight' };
     this.clipPlane = new THREE.Plane(new V3(0, 0, -1), 0);
@@ -381,8 +382,16 @@ export class Stage extends EventTarget {
   }
   setSnap(on, deg = this.snap.deg) { // rotation in degrees; moves and scale snap to 0.1 units
     this.snap = { on, deg };
-    this.tc.setRotationSnap(on ? THREE.MathUtils.degToRad(deg) : null); this.tc.setTranslationSnap(on ? .1 : null); this.tc.setScaleSnap(on ? .1 : null);
+    // the gizmo's own rotation snap only rounds how far you turn, so a part that starts at 10 degrees would go 25, 40...:
+    // rotation is snapped to absolute angles below instead (see _snapRotation)
+    this.tc.setRotationSnap(null); this.tc.setTranslationSnap(on ? .1 : null); this.tc.setScaleSnap(on ? .1 : null);
+    if (on && this.tc.object && this.tc.mode === 'rotate') { this._snapRotation(); this.emit('change'); }
     this.emit('snap');
+  }
+  _snapRotation() { // every angle of the part ends up on a multiple of the chosen step (0, 15, 30... degrees)
+    const o = this.tc.object; if (!this.snap.on || this.tc.mode !== 'rotate' || !o) return;
+    const st = THREE.MathUtils.degToRad(this.snap.deg), e = o.rotation, r = v => Math.round(v / st) * st;
+    e.set(r(e.x), r(e.y), r(e.z));
   }
   resetColors() {
     const e = new Map();
