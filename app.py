@@ -174,6 +174,31 @@ def _gzip(src: Path, dst: Path):  # lossless: Drive stores the .gz, viewers get 
         shutil.copyfileobj(a, b, db.MB)
 
 
+async def _save_pack(up: UploadFile, dest: Path, im: dict):
+    """Stage a 360 image pack and check it against the owner's tier. Layout: b'S3IM' + u32 index length + JSON index + frames."""
+    size = 0
+    with open(dest, "wb") as f:
+        while chunk := await up.read(db.MB):
+            size += len(chunk)
+            if size > im["max_mb"] * db.MB:
+                raise HTTPException(413, f"Image pack limit of your tier is {im['max_mb']} MB")
+            f.write(chunk)
+    try:
+        with open(dest, "rb") as f:
+            head = f.read(8)
+            n = int.from_bytes(head[4:8], "little")
+            assert head[:4] == b"S3IM" and 0 < n <= db.MB
+            ix = json.loads(f.read(n))
+        az, el, w, h = (int(ix[k]) for k in ("az", "el", "w", "h"))
+        data = size - 8 - n
+        assert 1 <= az <= im["max_az"] and 1 <= el <= im["max_el"] and 1 <= w <= im["max_px"] and 1 <= h <= im["max_px"]
+        assert ix["mime"] in ("image/webp", "image/jpeg") and len(ix["frames"]) == az * el
+        assert all(o >= 0 and ln > 0 and o + ln <= data for o, ln in ix["frames"])
+        assert ix.get("anno") is None or len(ix["anno"]) == az * el
+    except Exception:
+        raise HTTPException(400, "Invalid image pack, or it is above the limits of your tier")
+
+
 def get_share(share_id: str):
     if not ID_RE.match(share_id):
         raise HTTPException(404)
@@ -207,7 +232,8 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
                 title: str = Form("Untitled", max_length=120), allow_download: bool = Form(False),
                 allow_measure: bool = Form(False), allow_explode: bool = Form(False),
                 update_id: str = Form(""), expires_in_days: int = Form(0, ge=0, le=3650),
-                password: str = Form("", max_length=64),
+                password: str = Form("", max_length=64), kind: str = Form("model"), watermark: str = Form("", max_length=40),
+                pack: UploadFile | None = File(None),
                 hdr: UploadFile | None = File(None), u=Depends(current_user)):
     rate_limit(request, "share", 20)
     lid = u["license_id"]
@@ -233,10 +259,24 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
     for flag, tool in db.SHARE_FLAG_TOOL.items():
         if flags[flag] and tool not in tier["tools"]:
             raise HTTPException(403, f"{tool} is not included in your tier")
+    if kind not in ("model", "images"):
+        raise HTTPException(400, "kind must be model or images")
+    im = tier["images"]
+    if kind == "images":
+        if pack is None or not pack.filename:
+            raise HTTPException(400, "Image links need the rendered image pack")
+        flags["allow_measure"] = flags["allow_explode"] = False  # these need real 3D geometry, which image links never send
+        hdr = None
     if await model.read(4) != b"glTF":
         raise HTTPException(400, "Model must be a binary .glb")
     await model.seek(0)
     sid = update_id or secrets.token_urlsafe(9)
+    if kind == "images":
+        try:
+            await _save_pack(pack, db.SHARES / f"{sid}.pack", im)
+        except BaseException:
+            (db.SHARES / f"{sid}.pack").unlink(missing_ok=True)
+            raise
     dest, size = db.SHARES / f"{sid}.glb", 0
     try:
         with open(dest, "wb") as f:
@@ -257,7 +297,7 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
     drive = {}  # data/shares is only a short-lived staging area: files move to Drive and the local copy is removed
     try:
         await run_in_threadpool(_gzip, dest, db.SHARES / f"{sid}.glb.gz")
-        for key, fname in (("glbz", f"{sid}.glb.gz"), ("hdr", f"{sid}.hdr")):
+        for key, fname in (("glbz", f"{sid}.glb.gz"), ("hdr", f"{sid}.hdr"), ("pack", f"{sid}.pack")):
             p = db.SHARES / fname
             if p.exists():
                 drive[key] = await run_in_threadpool(storage.upload, lid, p, fname)
@@ -268,19 +308,23 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
             raise HTTPException(409, "Connect your Google Drive first (Drive button in the top bar).")
         raise HTTPException(502, "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive.")
     finally:
-        for ext in ("glb", "glb.gz", "hdr"):
+        for ext in ("glb", "glb.gz", "hdr", "pack"):
             (db.SHARES / f"{sid}.{ext}").unlink(missing_ok=True)
     exp = int(time.time() + expires_in_days * 86400) if expires_in_days else None
     pw = db.hash_pw(password) if password else None
-    fmts = json.dumps(tier["formats"] if allow_download else [])
-    vals = (title, json.dumps(cfg), *map(int, flags.values()), fmts, json.dumps(drive), exp, pw)
+    # image links can only offer the original GLB (other formats are made in the 3D viewer, which they never load)
+    fmts = json.dumps((["glb"] if "glb" in tier["formats"] else []) if kind == "images" and allow_download else tier["formats"] if allow_download else [])
+    mode, text = im["watermark"], watermark.strip()
+    wm = {"text": "Scic3DViewer", "tile": True, "cross": True} if mode == "forced" else \
+         {"text": text, "tile": False, "cross": False} if mode == "custom" and text else None  # chosen here, never by the browser
+    vals = (title, json.dumps(cfg), *map(int, flags.values()), fmts, json.dumps(drive), exp, pw, kind, json.dumps(wm) if wm else None)
     with db.connect() as c:
         if old:
             c.execute("UPDATE shares SET title=?,config=?,allow_download=?,allow_measure=?,allow_explode=?,formats=?,"
-                      "drive_ids=?,expires_at=?,pw_hash=?,revoked=0 WHERE share_id=?", (*vals, sid))
+                      "drive_ids=?,expires_at=?,pw_hash=?,kind=?,wm=?,revoked=0 WHERE share_id=?", (*vals, sid))
         else:
             c.execute("INSERT INTO shares(title,config,allow_download,allow_measure,allow_explode,formats,drive_ids,"
-                      "expires_at,pw_hash,share_id,license_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "expires_at,pw_hash,kind,wm,share_id,license_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (*vals, sid, lid, int(time.time())))
     if old:  # the previous files are only removed once the new ones are safely stored
         for fid in json.loads(old["drive_ids"] or "{}").values():
@@ -299,7 +343,7 @@ class Patch(BaseModel):
 def my_projects(u=Depends(current_user)):
     ids = db.license_ids(u["email"])
     with db.connect() as c:
-        rows = c.execute(f"SELECT share_id,title,created_at,views,allow_download,allow_measure,allow_explode,expires_at,"
+        rows = c.execute(f"SELECT share_id,title,kind,created_at,views,allow_download,allow_measure,allow_explode,expires_at,"
                          f"revoked,pw_hash IS NOT NULL AS locked FROM shares WHERE license_id IN ({','.join('?' * len(ids))}) "
                          f"ORDER BY created_at DESC", ids).fetchall()
     return [dict(r) for r in rows]
@@ -345,7 +389,8 @@ def share_config(share_id: str, request: Request):
     db.log(r["license_id"], "view", request.client.host, share_id)
     return {"title": r["title"], "config": json.loads(r["config"]), "formats": json.loads(r["formats"]),
             "allow_download": bool(r["allow_download"]), "allow_measure": bool(r["allow_measure"]),
-            "allow_explode": bool(r["allow_explode"])}
+            "allow_explode": bool(r["allow_explode"]), "kind": r["kind"] or "model",
+            "watermark": json.loads(r["wm"]) if r["wm"] else None}
 
 
 def _gunzip(chunks):
@@ -378,7 +423,18 @@ def serve(r, ext: str, mime: str):
 def share_model(share_id: str, request: Request):
     r = get_share(share_id)
     check_access(r, request)
+    if r["kind"] == "images" and not r["allow_download"]:
+        raise HTTPException(404)  # image links never send the 3D model unless the owner allowed downloads
     return serve(r, "glb", "model/gltf-binary")
+
+
+@app.get("/api/projects/{share_id}/images")
+def share_images(share_id: str, request: Request):
+    r = get_share(share_id)
+    check_access(r, request)
+    if r["kind"] != "images":
+        raise HTTPException(404)
+    return serve(r, "pack", "application/octet-stream")
 
 
 @app.get("/api/projects/{share_id}/hdr")

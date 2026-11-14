@@ -69,6 +69,21 @@ python admin.py revoke  user@mail.com
 | Callouts | 2 | unlimited | unlimited |
 | Share permissions | view-only | download (GLB), explode | + ruler/caliper, GLB/OBJ/STL |
 
+### 360° picture links (view-only)
+
+A link can be published as pictures instead of a 3D model: the Studio photographs the model from many angles into one
+pack file in the owner's Drive, and the visitor's browser only receives pictures (no Three.js, no model; dragging shows the
+nearest picture). The original GLB stays private in the owner's Drive for editing and is only served if the owner allowed downloads.
+The server enforces the limits and the watermark; the browser cannot choose them.
+
+| | Free | Pro | Enterprise |
+|---|---|---|---|
+| Quality presets | Light (36×3, 800 px) | + Standard (72×5, 1024 px) | + High (120×7, 1400 px) and Custom (up to 180×12, 2048 px) |
+| Watermark | forced text + faint cross | none | optional own text |
+| Model download on the link | no | GLB | GLB |
+
+Measure, exploded view and part visibility are not available on picture links. Pictures can still be screenshotted.
+
 The server checks size, callout count, share permissions, and custom `.hdr` uploads. Editing tools (slicer, paint fill,
 decimation, ...) run in the browser and are gated in the UI only: a determined user can bypass them with devtools.
 They cannot get a bigger upload, extra share permissions, or more formats on shared links.

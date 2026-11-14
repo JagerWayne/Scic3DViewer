@@ -18,14 +18,8 @@ import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
 
 const V3 = THREE.Vector3;
-export const BACKDROPS = {
-  midnight: 'radial-gradient(circle at 50% 30%,#1e293b,#020617)',
-  slate: 'linear-gradient(#334155,#0f172a)',
-  studio: 'linear-gradient(#9ca3af,#4b5563)',
-  sunset: 'linear-gradient(#7c3aed,#f97316)',
-  white: '#f8fafc',
-  transparent: 'repeating-conic-gradient(#64748b 0% 25%,#475569 0% 50%) 50%/24px 24px',
-};
+import { BACKDROPS, BACKDROP_FLAT } from '/static/js/backdrops.js';
+export { BACKDROPS };
 // [hemisphere intensity, then (intensity, position) for key / fill / rim directional lights]
 const LIGHT_PRESETS = {
   studio: { hemi: .6, dirs: [[2.2, [3, 5, 4]], [.8, [-4, 2, -2]], [1.2, [0, 3, -5]]] },
@@ -634,6 +628,45 @@ export class Stage extends EventTarget {
       rec.onstop = () => { this._helpers(true); this.controls.enabled = true; res(new Blob(chunks, { type: 'video/webm' })); };
       rec.start(); step();
     });
+  }
+  // ---------- 360 image pack: view-only links send pictures, never the model ----------
+  // Photographs the model from `az` x `el` angles (full turn, elevations elMin..elMax degrees). The callout positions are
+  // projected per frame so the image viewer can draw them without any 3D data. Returns the frames as blobs plus the index data.
+  async renderTurntable({ az, el, elMin, elMax, px, quality, onProgress, cancelled }) {
+    const box = new THREE.Box3().setFromObject(this.assembly).union(new THREE.Box3().setFromObject(this.base));
+    if (box.isEmpty()) throw new Error('Nothing to render');
+    const r = this.renderer, cam = this.camera, tgt = this.controls.target;
+    const keep = { pos: cam.position.clone(), tgt: tgt.clone(), near: cam.near, far: cam.far, pr: r.getPixelRatio() };
+    const c = box.getCenter(new V3()), dist = box.getSize(new V3()).length() / 2 / Math.sin(cam.fov * Math.PI / 360) * 1.08;
+    const probe = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+    const webp = (await new Promise(ok => probe.toBlob(b => ok(b?.type), 'image/webp'))) === 'image/webp'; // Safari cannot encode WebP
+    const mime = webp ? 'image/webp' : 'image/jpeg';
+    const elevs = Array.from({ length: el }, (_, i) => (el === 1 ? (elMin + elMax) / 2 : elMin + (elMax - elMin) * i / (el - 1)));
+    const blobs = [], anno = [];
+    r.setAnimationLoop(null); this.fly = null; this.controls.enabled = false; this._helpers(false);
+    this.dim = 1; this.spotLight.intensity = 0; this.lights.forEach(l => (l.intensity = l.userData.base * this.state.light));
+    if (!webp) r.setClearColor(new THREE.Color(BACKDROP_FLAT[this.state.backdrop] || '#0f172a'), 1); // JPEG has no transparency
+    r.setPixelRatio(1); r.setSize(px, px, false); cam.aspect = 1; cam.near = dist / 100; cam.far = dist * 100; cam.updateProjectionMatrix();
+    try {
+      for (let e = 0; e < el; e++) for (let a = 0; a < az; a++) {
+        if (cancelled?.()) throw new Error('Cancelled');
+        const th = a / az * Math.PI * 2, ph = elevs[e] * Math.PI / 180;
+        cam.position.set(c.x + dist * Math.cos(ph) * Math.sin(th), c.y + dist * Math.sin(ph), c.z + dist * Math.cos(ph) * Math.cos(th));
+        tgt.copy(c); cam.lookAt(c); cam.updateMatrixWorld();
+        r.render(this.scene, cam);
+        blobs.push(await new Promise(ok => r.domElement.toBlob(ok, mime, quality)));
+        anno.push(this.annotations.map(n => { // [x, y, 1 when the callout faces the camera]
+          const p = new V3(...n.point), v = cam.position.clone().sub(p).normalize(), q = p.clone().project(cam);
+          return [+((q.x + 1) / 2).toFixed(3), +((1 - q.y) / 2).toFixed(3), +(q.z < 1 && v.dot(new V3(...n.normal)) > .05)];
+        }));
+        onProgress?.((e * az + a + 1) / (az * el));
+      }
+    } finally {
+      cam.position.copy(keep.pos); tgt.copy(keep.tgt); cam.near = keep.near; cam.far = keep.far;
+      r.setClearColor(0x000000, 0); r.setPixelRatio(keep.pr); this._resize(); this._helpers(true); this.controls.enabled = true;
+      r.setAnimationLoop(() => this._loop());
+    }
+    return { blobs, anno, mime, w: px, h: px, az, el, elevs };
   }
   getConfig() {
     const s = this.state;

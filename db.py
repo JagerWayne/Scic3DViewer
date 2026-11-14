@@ -12,14 +12,17 @@ ADMIN_EMAIL = os.environ.get("SCIC_ADMIN_EMAIL", "waynescicluna.1985@gmail.com")
 # Server-side tier table: the single source of truth, also sent to the UI via /api/me.
 TIERS = {
     "FREE": dict(max_mb=15, max_annotations=2, share_permissions=False, formats=[],
-                 tools=["paint_basic"]),
+                 tools=["paint_basic"],
+                 images=dict(presets=["light"], custom=False, watermark="forced", max_az=36, max_el=3, max_px=800, max_mb=12)),
     "PRO": dict(max_mb=100, max_annotations=None, share_permissions=True, formats=["glb"],
                 tools=["paint_basic", "paint_fill", "assembly", "tour", "slicer", "explode",
-                       "decimate", "base", "hdri", "capture"]),
+                       "decimate", "base", "hdri", "capture"],
+                images=dict(presets=["light", "standard"], custom=False, watermark="none", max_az=72, max_el=5, max_px=1024, max_mb=60)),
     "ENTERPRISE": dict(max_mb=500, max_annotations=None, share_permissions=True,
                        formats=["glb", "obj", "stl", "usdz"],
                        tools=["paint_basic", "paint_fill", "paint_undo", "assembly", "tour",
-                              "slicer", "explode", "measure", "decimate", "base", "hdri", "capture", "cad_import"]),
+                              "slicer", "explode", "measure", "decimate", "base", "hdri", "capture", "cad_import"],
+                       images=dict(presets=["light", "standard", "high"], custom=True, watermark="custom", max_az=180, max_el=12, max_px=2048, max_mb=250)),
 }
 # Which share flag needs which tool (recipient permissions can't exceed the creator's tier).
 SHARE_FLAG_TOOL = {"allow_measure": "measure", "allow_explode": "explode"}
@@ -65,7 +68,9 @@ def init():
                 pass
         have = {r[1] for r in c.execute("PRAGMA table_info(shares)")}
         for col, typ in (("drive_ids", "TEXT"),            # JSON {"glbz": id, "hdr": id}  (legacy: "glb")
-                         ("expires_at", "INTEGER"), ("revoked", "INTEGER DEFAULT 0"), ("pw_hash", "TEXT")):
+                         ("expires_at", "INTEGER"), ("revoked", "INTEGER DEFAULT 0"), ("pw_hash", "TEXT"),
+                         ("kind", "TEXT DEFAULT 'model'"),  # 'model' = interactive 3D, 'images' = 360 image pack (no 3D data for visitors)
+                         ("wm", "TEXT")):                    # JSON {text, tile, cross}: watermark chosen by the server from the owner's tier
             if col not in have:
                 c.execute(f"ALTER TABLE shares ADD COLUMN {col} {typ}")
 

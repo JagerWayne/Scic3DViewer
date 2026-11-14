@@ -48,7 +48,7 @@ def test_studio_publish_projects_and_viewer(server):
         studio.goto(BASE + "/studio")
         studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
         studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
-        studio.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+        studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
 
         studio.click("#share"); studio.fill("#sTitle", "E2E model"); studio.click("#sGo")
         studio.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
@@ -62,7 +62,7 @@ def test_studio_publish_projects_and_viewer(server):
         viewer = ctx.new_page(); viewer.on("pageerror", lambda e: errors.append(str(e)))
         viewer.goto(url)
         viewer.wait_for_function("document.title === 'E2E model'", timeout=30000)
-        viewer.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+        viewer.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
         assert not errors, errors
         browser.close()
 
@@ -76,7 +76,7 @@ def test_share_dialog_on_a_phone(server):
         page.goto(BASE + "/studio")
         page.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
         page.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
-        page.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+        page.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
         shown = lambda sel: page.evaluate(f"getComputedStyle(document.querySelector('{sel}')).display")
         assert page.evaluate("document.querySelector('#panel').offsetHeight") <= 2      # settings sheet starts closed on a phone (just its border shows)
         page.click("#share")
@@ -135,7 +135,7 @@ def test_viewer_parts_panel_starts_closed_and_can_be_opened(server):
         studio.goto(BASE + "/studio")
         studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
         studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
-        studio.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+        studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
         studio.click("#share"); studio.click("#sGo")
         studio.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
         url = studio.input_value("#sUrl")
@@ -143,7 +143,7 @@ def test_viewer_parts_panel_starts_closed_and_can_be_opened(server):
                           ("phone", dict(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True))):
             page = browser.new_context(bypass_csp=True, **ctx).new_page()
             page.goto(url)
-            page.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+            page.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
             shown = lambda: page.evaluate("getComputedStyle(document.querySelector('#panel')).display")
             fits = page.evaluate("""() => { const s = window.stage, V = s.camera.position.constructor;
                 return [[-1, 0, -1], [1, 0, -1], [-1, 2, 1], [1, 2, 1], [-1, 0, 1], [1, 2, -1]].every(p => { const n = new V(...p).project(s.camera); return Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1; }); }""")
@@ -195,4 +195,64 @@ def test_admin_page_only_for_the_admin(server):
             page.add_init_script(f"localStorage.setItem('scic_token','{token}')")
             page.goto(BASE + "/admin")
             page.wait_for_function(f"document.body.innerText.includes({expect!r})", timeout=30000)
+        browser.close()
+
+
+def publish_images(browser, token, custom=None):
+    studio = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}).new_page()
+    studio.add_init_script(f"localStorage.setItem('scic_token','{token}')")
+    studio.goto(BASE + "/studio")
+    studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
+    studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
+    studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
+    studio.click("#share"); studio.check("input[name=sKindR][value=images]")
+    if custom:  # Enterprise fine-tuning: a tiny pack keeps the test fast
+        studio.select_option("#iPreset", "custom")
+        for k, v in custom.items():
+            studio.fill("#" + k, str(v))
+        studio.fill("#iWm", "(c) E2E Studio")
+    studio.click("#sGo")
+    studio.wait_for_selector("#sResult:not(.hidden)", timeout=180000)
+    return studio.input_value("#sUrl")
+
+
+def test_image_link_viewer_has_no_3d_and_rotates_with_the_mouse(server):
+    db.create_license("Ent User", "ent@x.com", "ENTERPRISE", "30d")
+    token = db.login_google("Ent User", "ent@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        url = publish_images(browser, token, dict(iAz=8, iEl=2, iPx=256, iQ=70, iElMin=10, iElMax=40))
+        viewer, reqs, errors = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page(), [], []
+        viewer.on("request", lambda r: reqs.append(r.url)); viewer.on("pageerror", lambda e: errors.append(str(e)))
+        viewer.goto(url)
+        viewer.wait_for_function("document.querySelector('#stage canvas') && document.querySelector('#stage canvas').width > 1", timeout=30000)
+        viewer.wait_for_timeout(600)
+        shot = lambda: viewer.evaluate("document.querySelector('#stage canvas').toDataURL()")
+        before = shot()
+        assert any("/images" in u for u in reqs)
+        assert not any("/model" in u or "three" in u or "stage.js" in u for u in reqs), reqs   # no model, no 3D engine
+        assert viewer.evaluate("typeof window.stage?.exportAs") == "undefined"          # (window.stage is just the #stage div here)
+        assert viewer.evaluate("getComputedStyle(document.querySelector('#panelBtn')).display") == "none"
+        viewer.mouse.move(300, 350); viewer.mouse.down(); viewer.mouse.move(600, 350, steps=12); viewer.mouse.up()
+        viewer.wait_for_timeout(900)
+        assert shot() != before                                                          # dragging shows other pictures
+        assert not errors, errors
+        browser.close()
+
+
+def test_free_image_link_draws_the_watermark(server):
+    token = db.login_google("Free Img", "freeimg@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        url = publish_images(browser, token)                                              # Light preset: 36 x 3 pictures
+        viewer, errors = browser.new_context(bypass_csp=True).new_page(), []
+        viewer.on("pageerror", lambda e: errors.append(str(e)))
+        viewer.goto(url)
+        viewer.wait_for_function("document.querySelector('#stage canvas') && document.querySelector('#stage canvas').width > 1", timeout=30000)
+        viewer.wait_for_timeout(800)
+        # the watermark text and the cross are painted on the canvas itself: pixels exist even at a corner where the cube is not
+        corner = viewer.evaluate("""() => { const c = document.querySelector('#stage canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+            let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n / (c.width * c.height); }""")
+        assert corner > 0.005
+        assert not errors, errors
         browser.close()

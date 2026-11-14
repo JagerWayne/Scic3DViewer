@@ -136,8 +136,26 @@
   <div class="glass rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
     <h2 class="text-lg font-bold">Share link</h2>
     <label class="text-xs">Title<input class="inp" id="sTitle" maxlength="120" value="Untitled"></label>
+    <fieldset class="flex flex-col gap-1 text-sm" id="sKind">
+      <label><input type="radio" name="sKindR" value="model" checked> Interactive 3D <span class="text-xs text-slate-400">(visitors receive the 3D model)</span></label>
+      <label><input type="radio" name="sKindR" value="images"> 360&deg; pictures <span class="text-xs text-slate-400">(view-only: visitors only receive pictures, never the model)</span></label>
+    </fieldset>
+    <div id="sImg" class="hidden flex flex-col gap-2">
+      <label class="text-xs">Picture quality<select class="inp" id="iPreset"></select></label>
+      <div id="iCustom" class="hidden grid grid-cols-3 gap-2">
+        <label class="text-xs">Shots around<input class="inp" id="iAz" type="number" min="4" step="1"></label>
+        <label class="text-xs">Heights<input class="inp" id="iEl" type="number" min="1" step="1"></label>
+        <label class="text-xs">Size (px)<input class="inp" id="iPx" type="number" min="256" step="64"></label>
+        <label class="text-xs">Lowest angle &deg;<input class="inp" id="iElMin" type="number" min="-60" max="85" step="1"></label>
+        <label class="text-xs">Highest angle &deg;<input class="inp" id="iElMax" type="number" min="-60" max="85" step="1"></label>
+        <label class="text-xs">Quality %<input class="inp" id="iQ" type="number" min="40" max="95" step="1"></label>
+      </div>
+      <label class="text-xs hidden" id="iWmRow">Your watermark text (optional)<input class="inp" id="iWm" maxlength="40" placeholder="e.g. &copy; Your Studio"></label>
+      <p class="text-xs text-slate-400" id="iInfo"></p>
+      <div id="iProg" class="hidden flex items-center gap-2 text-xs"><progress id="iBar" max="100" value="0" class="flex-1"></progress><span id="iPct">0%</span><button class="btn" id="iCancel" type="button">Cancel</button></div>
+    </div>
     <fieldset class="flex flex-col gap-2 text-sm" id="sPerms">
-      <label><input type="checkbox" id="pDl"> Allow multi-format 3D download</label>
+      <label><input type="checkbox" id="pDl"> <span id="pDlText">Allow multi-format 3D download</span></label>
       <label><input type="checkbox" id="pMeasure"> Enable ruler &amp; angle/thickness caliper</label>
       <label><input type="checkbox" id="pExplode"> Enable exploded view slider</label>
     </fieldset>

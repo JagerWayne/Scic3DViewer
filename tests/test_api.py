@@ -13,7 +13,7 @@ GLB = b"glTF" + b"\0" * 100
 
 @pytest.fixture(autouse=True)
 def fake_drive(monkeypatch):  # in-memory per-user "Drive"; every test user counts as connected
-    cloud.clear()
+    cloud.clear(); appmod._hits.clear()  # each test starts with fresh rate-limit counters
     monkeypatch.setattr(storage, "configured", lambda: True)
     monkeypatch.setattr(storage, "connected", lambda lid: True)
     def upload(lid, p, name):  # unique ids, like the real Drive
@@ -403,3 +403,69 @@ def test_stripe_webhook_creates_one_license(monkeypatch):
     with db.connect() as con:
         assert con.execute("SELECT COUNT(*) FROM licenses WHERE email='buyer@x.com'").fetchone()[0] == 1
     assert tier(login("buyer@x.com")) == "PRO"
+
+
+# ---------- 360 picture links: visitors get pictures only ----------
+def mkpack(az=4, el=1, px=64, mime="image/webp", anno=None):
+    frames, off = [], 0
+    for _ in range(az * el):
+        frames.append([off, 5]); off += 5
+    ix = json.dumps({"v": 1, "mime": mime, "w": px, "h": px, "az": az, "el": el, "elevs": [20] * el, "frames": frames, "anno": anno}).encode()
+    return b"S3IM" + len(ix).to_bytes(4, "little") + ix + b"12345" * (az * el)
+
+
+def share_images(h, pack=None, **data):
+    return c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB), "pack": ("p.s3im", pack or mkpack())},
+                  data={"config": "{}", "kind": "images", **data})
+
+
+def test_image_link_never_sends_the_model():
+    h = pro("img1@x.com")
+    sid = share_images(h).json()["share_id"]
+    cfg = c.get(f"/api/projects/{sid}/config").json()
+    assert cfg["kind"] == "images" and cfg["watermark"] is None                      # Pro: no watermark
+    assert c.get(f"/api/projects/{sid}/images").content.startswith(b"S3IM")
+    assert c.get(f"/api/projects/{sid}/model").status_code == 404                     # download off: the model is not served
+    assert c.get(f"/api/projects/{sid}/edit-model", headers=h).content == GLB       # the owner can still edit it
+    sid2 = share_images(h, allow_download="true").json()["share_id"]
+    assert c.get(f"/api/projects/{sid2}/model").content == GLB                       # Pro may offer the model download
+    assert c.get(f"/api/projects/{sid2}/config").json()["formats"] == ["glb"]
+    plain = share(h).json()["share_id"]
+    assert c.get(f"/api/projects/{plain}/images").status_code == 404                  # 3D links have no pack
+
+
+def test_image_links_are_gated_by_tier():
+    free = login("img2@x.com")
+    r = share_images(free)
+    assert r.status_code == 200
+    cfg = c.get(f"/api/projects/{r.json()['share_id']}/config").json()
+    assert cfg["watermark"] == {"text": "Scic3DViewer", "tile": True, "cross": True}  # Free: watermark and faint cross, set by the server
+    assert share_images(free, watermark="mine").status_code == 200                    # the typed text is ignored for Free
+    assert share_images(free, allow_download="true").status_code == 403               # Free: no model download
+    assert share_images(free, pack=mkpack(az=72, el=3)).status_code == 400            # Light only (36 shots)
+    assert share_images(free, pack=mkpack(px=1024)).status_code == 400
+    pro_h = pro("img3@x.com")
+    assert share_images(pro_h, pack=mkpack(az=72, el=5, px=1024)).status_code == 200  # Standard
+    assert share_images(pro_h, pack=mkpack(az=120, el=7, px=1400)).status_code == 400 # High is Enterprise
+    sid = share_images(pro_h, watermark="x").json()["share_id"]
+    assert c.get(f"/api/projects/{sid}/config").json()["watermark"] is None
+
+
+def test_enterprise_fine_tunes_and_sets_its_own_watermark():
+    db.create_license("E E", "img4@x.com", "ENTERPRISE", "30d")
+    h = login("img4@x.com")
+    r = share_images(h, pack=mkpack(az=120, el=7, px=1400, anno=[[]] * 840), watermark="(c) Studio")
+    assert r.status_code == 200
+    cfg = c.get(f"/api/projects/{r.json()['share_id']}/config").json()
+    assert cfg["watermark"] == {"text": "(c) Studio", "tile": False, "cross": False}
+    assert share_images(h, pack=mkpack(az=181, el=1)).status_code == 400              # beyond the Enterprise ceiling
+    assert share_images(h, pack=mkpack(az=3, el=1, anno=[[]])).status_code == 400    # anno list must match the frame count
+
+
+def test_bad_image_packs_are_refused():
+    h = pro("img5@x.com")
+    for bad in (b"nope" * 10, b"S3IM" + (9).to_bytes(4, "little") + b"not json!", mkpack(mime="image/gif")):
+        assert share_images(h, pack=bad).status_code == 400
+    r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", "kind": "images"})
+    assert r.status_code == 400                                                       # no pack at all
+    assert not list(db.SHARES.glob("*.pack"))                                          # nothing left on this server

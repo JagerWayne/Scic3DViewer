@@ -214,8 +214,61 @@ on('share', 'click', () => {
   $('#sPass').value = ''; $('#sExpiry').value = '0';
   show('sUpdateRow', !!editing); if (editing) { $('#sTitle').value = editing.title; $('#sEditing').textContent = `(${editing.title})`; }
   $('#sNote').textContent = me.tier === 'FREE' ? 'Free tier publishes view-only links, without expiry or password.' : ''; show('sNote', me.tier === 'FREE');
+  setupImages();
   show('sResult', false); show('sErr', false); show('shareModal');
 });
+// ---- 360 picture links (view-only). Tier limits are enforced by the server too; this only shapes the form. ----
+const PRESETS = {
+  light: { az: 36, el: 3, px: 800, q: 78, elMin: 8, elMax: 55 },
+  standard: { az: 72, el: 5, px: 1024, q: 80, elMin: 8, elMax: 58 },
+  high: { az: 120, el: 7, px: 1400, q: 82, elMin: 5, elMax: 65 },
+};
+const isImages = () => document.querySelector('input[name=sKindR]:checked').value === 'images';
+function imgParams() {
+  const lim = me.images, c = $('#iPreset').value === 'custom';
+  const P = c ? { az: +val('iAz'), el: +val('iEl'), px: +val('iPx'), q: +val('iQ'), elMin: +val('iElMin'), elMax: +val('iElMax') } : PRESETS[$('#iPreset').value];
+  const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v) || lo));
+  return { az: cl(P.az, 4, lim.max_az), el: cl(P.el, 1, lim.max_el), px: cl(P.px, 256, lim.max_px), q: cl(P.q, 40, 95),
+           elMin: cl(P.elMin, -60, 85), elMax: cl(P.elMax, -60, 85) };
+}
+function imgInfo() {
+  const P = imgParams(), mb = P.az * P.el * P.px * P.px * 0.09 * (P.q / 80) / 1e6;
+  $('#iInfo').textContent = `${P.az} × ${P.el} = ${P.az * P.el} pictures of ${P.px}px, about ${mb.toFixed(0)} MB (estimate). ` +
+    (me.images.watermark === 'forced' ? 'Free links carry a watermark and a faint cross.' : '');
+}
+function setKind() {
+  const on = isImages(); show('sImg', on);
+  for (const id of ['pMeasure', 'pExplode']) { if (on) $('#' + id).checked = false; $('#' + id).disabled = on || !can(id === 'pMeasure' ? 'measure' : 'explode'); }
+  $('#pDlText').textContent = on ? 'Allow visitors to download the model (.glb)' : 'Allow multi-format 3D download';
+  if (on) imgInfo();
+}
+function setupImages() {
+  const sel = $('#iPreset'); sel.replaceChildren(...me.images.presets.map(k => new Option(k[0].toUpperCase() + k.slice(1), k)));
+  if (me.images.custom) sel.add(new Option('Custom (fine-tune)', 'custom'));
+  document.querySelector('input[name=sKindR][value=model]').checked = true;
+  show('iWmRow', me.images.watermark === 'custom'); setKind(); show('iCustom', false);
+}
+document.querySelectorAll('input[name=sKindR]').forEach(r => r.addEventListener('change', setKind));
+on('iPreset', 'change', () => {
+  const c = $('#iPreset').value === 'custom'; show('iCustom', c);
+  if (c) { const P = PRESETS.standard; for (const [id, k] of [['iAz', 'az'], ['iEl', 'el'], ['iPx', 'px'], ['iQ', 'q'], ['iElMin', 'elMin'], ['iElMax', 'elMax']]) $('#' + id).value = P[k]; }
+  imgInfo();
+});
+for (const id of ['iAz', 'iEl', 'iPx', 'iQ', 'iElMin', 'iElMax']) on(id, 'input', imgInfo);
+let cancelPack = false; on('iCancel', 'click', () => { cancelPack = true; });
+async function buildPack() { // 'S3IM' + u32 index length + JSON index + the pictures, in one file
+  const P = imgParams(); cancelPack = false; show('iProg');
+  try {
+    const t = await stage.renderTurntable({ az: P.az, el: P.el, elMin: P.elMin, elMax: Math.max(P.elMin, P.elMax), px: P.px, quality: P.q / 100,
+      cancelled: () => cancelPack, onProgress: f => { $('#iBar').value = f * 100; $('#iPct').textContent = Math.round(f * 100) + '%'; } });
+    let off = 0; const frames = t.blobs.map(b => { const f = [off, b.size]; off += b.size; return f; });
+    const ix = new TextEncoder().encode(JSON.stringify({ v: 1, mime: t.mime, w: t.w, h: t.h, az: t.az, el: t.el, elevs: t.elevs, frames, anno: stage.annotations.length ? t.anno : null }));
+    const head = new Uint8Array(8); head.set([83, 51, 73, 77]); new DataView(head.buffer).setUint32(4, ix.length, true);
+    const pack = new Blob([head, ix, ...t.blobs]);
+    if (pack.size > me.images.max_mb * MB) throw new Error(`The pictures are ${(pack.size / MB).toFixed(0)} MB, over the ${me.images.max_mb} MB limit of the ${me.tier} tier. Choose a lower quality.`);
+    return pack;
+  } finally { show('iProg', false); }
+}
 on('sClose', 'click', () => show('shareModal', false));
 on('sCopy', 'click', () => navigator.clipboard?.writeText(val('sUrl')).then(() => toast('Link copied')));
 if (navigator.share) { // phones: the system share sheet (WhatsApp, Mail, Messages...)
@@ -240,6 +293,9 @@ on('sGo', 'click', async () => {
     fd.append('expires_in_days', val('sExpiry')); fd.append('password', val('sPass'));
     if (editing && $('#sUpdate').checked) fd.append('update_id', editing.id);
     if (stage.state.env === 'custom' && stage.hdrFile) fd.append('hdr', stage.hdrFile);
+    if (isImages()) { // the 3D model is still stored (privately, for editing) but visitors only get the pictures
+      fd.append('kind', 'images'); fd.append('watermark', val('iWm').trim()); fd.append('pack', await buildPack(), 'pack.s3im');
+    }
     const r = await call('/api/projects/share', { method: 'POST', body: fd });
     const url = location.origin + r.url; $('#sUrl').value = url;
     $('#sEmbed').value = `<iframe src="${url}" width="640" height="480" style="border:0" allow="fullscreen" allowfullscreen></iframe>`;
@@ -267,7 +323,7 @@ async function projects() {
     const dead = p.revoked ? 'revoked' : p.expires_at && p.expires_at < now ? 'expired' : '';
     const tr = document.createElement('tr'), td = () => tr.appendChild(document.createElement('td'));
     td().textContent = p.title || p.share_id;
-    td().textContent = new Date(p.created_at * 1000).toLocaleDateString() + ' · ' + p.views + ' views' + (p.locked ? ' · password' : '') +
+    td().textContent = new Date(p.created_at * 1000).toLocaleDateString() + ' · ' + p.views + ' views' + (p.kind === 'images' ? ' · 360° pictures' : '') + (p.locked ? ' · password' : '') +
       (p.expires_at && !dead ? ' · expires ' + new Date(p.expires_at * 1000).toLocaleDateString() : '') + (dead ? ' · ' + dead.toUpperCase() : '');
     const cell = td(); cell.style.textAlign = 'right'; cell.style.whiteSpace = 'nowrap';
     const run = (fn, msg) => async () => { try { await fn(); if (msg) toast(msg); projects(); } catch (e) { toast(e.message); } };
