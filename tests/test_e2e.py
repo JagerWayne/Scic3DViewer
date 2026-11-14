@@ -181,9 +181,15 @@ def test_viewer_parts_panel_starts_closed_and_can_be_opened(server):
                 return [[-1, 0, -1], [1, 0, -1], [-1, 2, 1], [1, 2, 1], [-1, 0, 1], [1, 2, -1]].every(p => { const n = new V(...p).project(s.camera); return Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1; }); }""")
             assert fits, name                                                  # the whole 2x2x2 cube is on screen, also on a narrow phone
             assert shown() == "none", name                                     # nothing covers the model at first
-            page.click("#panelBtn"); assert shown() != "none", name            # the Parts button opens it
+            page.click("#menuBtn")                                              # the options live in a burger menu, stacked under each other
+            box = page.locator("#menu").bounding_box(); vp = page.viewport_size
+            assert box["x"] >= 0 and box["x"] + box["width"] <= vp["width"] and box["y"] + box["height"] <= vp["height"], name   # fully on screen
+            ys = [page.locator(f"#menu {sel}").bounding_box() for sel in ("#rotate", "#full", "#panelBtn") if page.locator(f"#menu {sel}").is_visible()]
+            assert len(ys) >= 2 and all(b["y"] > a["y"] and abs(b["x"] - a["x"]) < 2 for a, b in zip(ys, ys[1:])), name        # one under the other
+            page.click("#panelBtn"); assert shown() != "none", name            # the Parts option opens the panel (and closes the menu)
+            assert page.locator("#menu").is_hidden(), name
             page.click("#panelClose"); assert shown() == "none", name          # the X closes it again
-            page.click("#panelBtn"); page.click("#panelBtn"); assert shown() == "none", name   # and the button toggles
+            page.click("#menuBtn"); page.click("#panelBtn"); page.click("#menuBtn"); page.click("#panelBtn"); assert shown() == "none", name   # and the option toggles
         browser.close()
 
 
@@ -299,9 +305,9 @@ def test_image_link_callouts_toggle_and_a_click_turns_to_the_tag(server):
         viewer = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page()
         viewer.goto(url)
         viewer.wait_for_selector(".callout:not([hidden])", timeout=30000)
-        viewer.click("button:has-text('Callouts')")                                       # viewers can hide the tags
+        viewer.click("#menuBtn"); viewer.click("button:has-text('Callouts')")             # viewers can hide the tags
         viewer.wait_for_selector(".callout", state="hidden", timeout=5000)
-        viewer.click("button:has-text('Callouts')")
+        viewer.click("#menuBtn"); viewer.click("button:has-text('Callouts')")
         viewer.wait_for_selector(".callout", state="visible", timeout=5000)
         viewer.click(".callout")                                                          # turns to the picture where the tag faces us
         viewer.wait_for_timeout(1200)
@@ -325,10 +331,10 @@ def test_image_link_rotates_when_zoomed_and_has_front_side_presets(server):
         before = frame()
         viewer.mouse.down(); viewer.mouse.move(750, 350, steps=12); viewer.mouse.up(); viewer.wait_for_timeout(900)
         assert frame() != before                                                         # dragging still rotates while zoomed
-        viewer.click("button:has-text('Side')"); viewer.wait_for_timeout(1200)
-        assert frame() % 8 == 2 and frame() < 8                                          # a quarter turn from the front, lowest height
-        viewer.click("button:has-text('Front')"); viewer.wait_for_timeout(1200)
-        assert frame() == 0
+        viewer.click("#menuBtn"); viewer.click("button:has-text('Side')")
+        viewer.wait_for_function("document.querySelector('#stage canvas').dataset.frame === '2'", timeout=8000)   # a quarter turn from the front, lowest height
+        viewer.click("#menuBtn"); viewer.click("button:has-text('Front')")
+        viewer.wait_for_function("document.querySelector('#stage canvas').dataset.frame === '0'", timeout=8000)
         browser.close()
 
 

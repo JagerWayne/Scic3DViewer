@@ -63,3 +63,6 @@ body.images #panelBtn,body.images #panel,body.images #tools,body.images #tour{di
 .tl-dot.now{border-color:#38bdf8;color:#fff;animation:tlpulse 1.4s ease-in-out infinite}
 @keyframes tlpulse{0%,100%{box-shadow:0 0 0 3px rgba(14,165,233,.35)}50%{box-shadow:0 0 0 7px rgba(14,165,233,.08)}}
 @media (prefers-reduced-motion:reduce){.tl-fill{transition:none}.tl-dot.now{animation:none}}
+
+/* share page burger menu: options stacked, full width */
+#menu .btn{width:100%;text-align:left;min-height:42px}

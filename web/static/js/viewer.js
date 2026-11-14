@@ -13,6 +13,13 @@ function askPassword(wrong) {
   });
 }
 
+// burger menu: every option sits under the others, so nothing is pushed off a narrow screen
+const menu = $('#menu'), menuBtn = $('#menuBtn');
+const setMenu = open => { menu.classList.toggle('hidden', !open); menuBtn.setAttribute('aria-expanded', open); };
+menuBtn.onclick = () => setMenu(menu.classList.contains('hidden'));
+menu.addEventListener('click', e => { if (e.target.closest('button')) setMenu(false); });
+document.addEventListener('pointerdown', e => { if (!menu.contains(e.target) && !menuBtn.contains(e.target)) setMenu(false); }, true);
+addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
 if (!document.fullscreenEnabled) $('#full').classList.add('hidden');
 $('#full').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
 
