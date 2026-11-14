@@ -63,7 +63,7 @@ async function loadFiles(files, replace) {
   for (const f of files) {
     if (/\.(step|stp)$/i.test(f.name) && !need('cad_import')) continue;
     if (f.size > me.max_mb * MB) { toast(`${f.name} is over the ${me.max_mb} MB limit of the ${me.tier} tier`); continue; }
-    try { await stage.loadFile(f); } catch (err) { toast(err.message); }
+    try { await stage.loadFile(f); if (!modelName || replace) modelName = f.name.replace(/\.[^.]+$/, ''); } catch (err) { toast(err.message); }
   }
   syncSliders();
 }
@@ -205,25 +205,37 @@ document.querySelectorAll('#exportModal [data-fmt]').forEach(b => b.addEventList
 
 let editing = null; // {id, title} while a published project is reopened for editing
 
-on('share', 'click', () => {
-  if (!stage.meshesAll().length) return toast('Load a model first');
-  if (!me.drive_connected) { show('driveModal'); return toast('Connect your Google Drive to publish links'); }
-  const perm = { pDl: me.share_permissions, pMeasure: can('measure'), pExplode: can('explode') };
-  for (const [id, ok] of Object.entries(perm)) { $('#' + id).disabled = !ok; $('#' + id).checked = false; }
-  for (const id of ['sExpiry', 'sPass']) $('#' + id).disabled = !me.share_permissions;
-  $('#sPass').value = ''; $('#sExpiry').value = '0';
-  show('sUpdateRow', !!editing); if (editing) { $('#sTitle').value = editing.title; $('#sEditing').textContent = `(${editing.title})`; }
-  $('#sNote').textContent = me.tier === 'FREE' ? 'Free tier publishes view-only links, without expiry or password.' : ''; show('sNote', me.tier === 'FREE');
-  setupImages();
-  show('sResult', false); show('sErr', false); show('shareModal');
-});
-// ---- 360 picture links (view-only). Tier limits are enforced by the server too; this only shapes the form. ----
+// ---- sharing wizard: 6 steps with a moving timeline. Publishes 360 picture links (view-only: visitors only get pictures). ----
+// Tier limits are enforced by the server too; this only shapes the form.
+const STEPS = ['Share title', 'Download permissions', 'Export quality', 'Expiry', 'Processing', 'Publish'];
 const PRESETS = {
   light: { az: 36, el: 3, px: 800, q: 78, elMin: 8, elMax: 55 },
   standard: { az: 72, el: 5, px: 1024, q: 80, elMin: 8, elMax: 58 },
   high: { az: 120, el: 7, px: 1400, q: 82, elMin: 5, elMax: 65 },
 };
-const isImages = () => document.querySelector('input[name=sKindR]:checked').value === 'images';
+let modelName = '', step = 1, cancelPack = false; // modelName = name of the loaded file, the default share title
+const setFill = frac => { $('#tlFill').style.width = `calc((100% - 26px) * ${frac})`; }; // the blue line slides (CSS transition)
+function goStep(n, err) {
+  step = n;
+  document.querySelectorAll('#shareModal [data-step]').forEach(s => s.classList.toggle('hidden', +s.dataset.step !== n));
+  $('#wizTitle').textContent = `Step ${n} of ${STEPS.length} · ${STEPS[n - 1]}`;
+  document.querySelectorAll('#tl .tl-dot').forEach((d, i) => { d.classList.toggle('done', i < n - 1); d.classList.toggle('now', i === n - 1); d.textContent = i < n - 1 ? '✓' : i + 1; });
+  setFill((n - 1) / (STEPS.length - 1));
+  show('sBack', (n > 1 && n < 5) || (n === 5 && !!err)); show('sNext', n < 5); show('iCancel', n === 5 && !err);
+  const note = me.tier === 'FREE' ? { 1: 'Passwords need the PRO tier.', 2: 'Model downloads need the PRO tier.', 4: 'Link expiry needs the PRO tier.' }[n] : '';
+  $('#sNote').textContent = note || ''; show('sNote', !!note);
+  show('sErr', !!err); if (err) $('#sErr').textContent = err;
+}
+on('share', 'click', () => {
+  if (!stage.meshesAll().length) return toast('Load a model first');
+  if (!me.drive_connected) { show('driveModal'); return toast('Connect your Google Drive to publish links'); }
+  for (const id of ['pDl', 'sUsePw', 'sExpiry']) $('#' + id).disabled = !me.share_permissions;
+  $('#pDl').checked = $('#sUsePw').checked = false; $('#sPass').value = ''; show('sPassRow', false); $('#sExpiry').value = '0';
+  $('#sTitle').value = editing ? editing.title : ''; $('#sTitle').placeholder = modelName || 'Untitled';
+  show('sUpdateRow', !!editing); if (editing) $('#sEditing').textContent = `(${editing.title})`;
+  setupImages(); goStep(1); show('shareModal');
+});
+on('sUsePw', 'change', () => { const c = $('#sUsePw').checked; show('sPassRow', c); if (c) $('#sPass').focus(); });
 function imgParams() {
   const lim = me.images, c = $('#iPreset').value === 'custom';
   const P = c ? { az: +val('iAz'), el: +val('iEl'), px: +val('iPx'), q: +val('iQ'), elMin: +val('iElMin'), elMax: +val('iElMax') } : PRESETS[$('#iPreset').value];
@@ -236,73 +248,74 @@ function imgInfo() {
   $('#iInfo').textContent = `${P.az} × ${P.el} = ${P.az * P.el} pictures of ${P.px}px, about ${mb.toFixed(0)} MB (estimate). ` +
     (me.images.watermark === 'forced' ? 'Free links carry a watermark and a faint cross.' : '');
 }
-function setKind() {
-  const on = isImages(); show('sImg', on);
-  for (const id of ['pMeasure', 'pExplode']) { if (on) $('#' + id).checked = false; $('#' + id).disabled = on || !can(id === 'pMeasure' ? 'measure' : 'explode'); }
-  $('#pDlText').textContent = on ? 'Allow visitors to download the model (.glb)' : 'Allow multi-format 3D download';
-  if (on) imgInfo();
-}
 function setupImages() {
   const sel = $('#iPreset'); sel.replaceChildren(...me.images.presets.map(k => new Option(k[0].toUpperCase() + k.slice(1), k)));
   if (me.images.custom) sel.add(new Option('Custom (fine-tune)', 'custom'));
-  document.querySelector('input[name=sKindR][value=model]').checked = true;
-  show('iWmRow', me.images.watermark === 'custom'); setKind(); show('iCustom', false);
+  show('iWmRow', me.images.watermark === 'custom'); show('iCustom', false); imgInfo();
 }
-document.querySelectorAll('input[name=sKindR]').forEach(r => r.addEventListener('change', setKind));
 on('iPreset', 'change', () => {
   const c = $('#iPreset').value === 'custom'; show('iCustom', c);
   if (c) { const P = PRESETS.standard; for (const [id, k] of [['iAz', 'az'], ['iEl', 'el'], ['iPx', 'px'], ['iQ', 'q'], ['iElMin', 'elMin'], ['iElMax', 'elMax']]) $('#' + id).value = P[k]; }
   imgInfo();
 });
 for (const id of ['iAz', 'iEl', 'iPx', 'iQ', 'iElMin', 'iElMax']) on(id, 'input', imgInfo);
-let cancelPack = false; on('iCancel', 'click', () => { cancelPack = true; });
-async function buildPack() { // 'S3IM' + u32 index length + JSON index + the pictures, in one file
-  const P = imgParams(); cancelPack = false; show('iProg');
-  try {
-    const t = await stage.renderTurntable({ az: P.az, el: P.el, elMin: P.elMin, elMax: Math.max(P.elMin, P.elMax), px: P.px, quality: P.q / 100,
-      cancelled: () => cancelPack, onProgress: f => { $('#iBar').value = f * 100; $('#iPct').textContent = Math.round(f * 100) + '%'; } });
-    let off = 0; const frames = t.blobs.map(b => { const f = [off, b.size]; off += b.size; return f; });
-    const ix = new TextEncoder().encode(JSON.stringify({ v: 1, mime: t.mime, w: t.w, h: t.h, az: t.az, el: t.el, elevs: t.elevs, frames, anno: stage.annotations.length ? t.anno : null }));
-    const head = new Uint8Array(8); head.set([83, 51, 73, 77]); new DataView(head.buffer).setUint32(4, ix.length, true);
-    const pack = new Blob([head, ix, ...t.blobs]);
-    if (pack.size > me.images.max_mb * MB) throw new Error(`The pictures are ${(pack.size / MB).toFixed(0)} MB, over the ${me.images.max_mb} MB limit of the ${me.tier} tier. Choose a lower quality.`);
-    return pack;
-  } finally { show('iProg', false); }
+on('iCancel', 'click', () => { cancelPack = true; });
+async function buildPack(P, onFrame) { // 'S3IM' + u32 index length + JSON index + the pictures, in one file
+  const t = await stage.renderTurntable({ az: P.az, el: P.el, elMin: P.elMin, elMax: Math.max(P.elMin, P.elMax), px: P.px, quality: P.q / 100,
+    cancelled: () => cancelPack, onProgress: onFrame });
+  let off = 0; const frames = t.blobs.map(b => { const f = [off, b.size]; off += b.size; return f; });
+  const ix = new TextEncoder().encode(JSON.stringify({ v: 1, mime: t.mime, w: t.w, h: t.h, az: t.az, el: t.el, elevs: t.elevs, frames, anno: stage.annotations.length ? t.anno : null }));
+  const head = new Uint8Array(8); head.set([83, 51, 73, 77]); new DataView(head.buffer).setUint32(4, ix.length, true);
+  const pack = new Blob([head, ix, ...t.blobs]);
+  if (pack.size > me.images.max_mb * MB) throw new Error(`The pictures are ${(pack.size / MB).toFixed(0)} MB, over the ${me.images.max_mb} MB limit of the ${me.tier} tier. Choose a lower quality.`);
+  return pack;
 }
-on('sClose', 'click', () => show('shareModal', false));
+on('sClose', 'click', () => { cancelPack = true; show('shareModal', false); });
+on('sBack', 'click', () => goStep(step === 5 ? 4 : step - 1));
+on('sNext', 'click', () => {
+  if (step === 1 && $('#sUsePw').checked && val('sPass').length < 4) return goStep(1, 'The password needs at least 4 characters.');
+  show('sErr', false);
+  if (step === 4) { goStep(5); return publish(); }
+  goStep(step + 1);
+});
 on('sCopy', 'click', () => navigator.clipboard?.writeText(val('sUrl')).then(() => toast('Link copied')));
 if (navigator.share) { // phones: the system share sheet (WhatsApp, Mail, Messages...)
   $('#sNative').classList.remove('hidden');
-  on('sNative', 'click', () => navigator.share({ title: val('sTitle') || 'Scic3DViewer', url: val('sUrl') }).catch(() => {}));
+  on('sNative', 'click', () => navigator.share({ title: val('sTitle') || modelName || 'Scic3DViewer', url: val('sUrl') }).catch(() => {}));
 }
 on('sCopyEmbed', 'click', () => navigator.clipboard?.writeText(val('sEmbed')).then(() => toast('Embed code copied')));
 async function showQr(url) { // the QR library loads from the CDN only when a link is created
   const img = $('#sQr');
   try { const qr = (await import('qrcode-generator')).default(0, 'M'); qr.addData(url); qr.make(); img.src = qr.createDataURL(4); img.classList.remove('hidden'); } catch { img.classList.add('hidden'); }
 }
-on('sGo', 'click', async () => {
-  const b = $('#sGo'); b.disabled = true; show('sErr', false);
+async function publish() { // step 5: draw the pictures (with a live preview), upload everything, then step 6 shows the link
+  const P = imgParams(), status = t => { $('#pvStatus').textContent = t; };
+  cancelPack = false; let prev = '';
+  $('#pvImg').removeAttribute('src'); $('#pvBox').style.background = BACKDROPS[stage.state.backdrop] || BACKDROPS.midnight;
+  $('#iBar').value = 0; $('#iPct').textContent = '0%'; status('Drawing the pictures…');
   try {
-    const glb = await stage.exportAs('glb');
-    if (glb.size > me.max_mb * MB) throw new Error(`Model is over the ${me.max_mb} MB limit of the ${me.tier} tier`);
     const fd = new FormData();
-    fd.append('model', glb, 'model.glb'); fd.append('title', val('sTitle').trim() || 'Untitled'); fd.append('config', JSON.stringify(stage.getConfig()));
-    if ($('#pDl').checked) fd.append('allow_download', 'true');
-    if ($('#pMeasure').checked) fd.append('allow_measure', 'true');
-    if ($('#pExplode').checked) fd.append('allow_explode', 'true');
-    fd.append('expires_in_days', val('sExpiry')); fd.append('password', val('sPass'));
-    if (editing && $('#sUpdate').checked) fd.append('update_id', editing.id);
-    if (stage.state.env === 'custom' && stage.hdrFile) fd.append('hdr', stage.hdrFile);
-    if (isImages()) { // the 3D model is still stored (privately, for editing) but visitors only get the pictures
-      fd.append('kind', 'images'); fd.append('watermark', val('iWm').trim()); fd.append('pack', await buildPack(), 'pack.s3im');
+    if ($('#pDl').checked) { // the model is only stored in Drive when visitors may download it
+      const glb = await stage.exportAs('glb');
+      if (glb.size > me.max_mb * MB) throw new Error(`Model is over the ${me.max_mb} MB limit of the ${me.tier} tier`);
+      fd.append('model', glb, 'model.glb'); fd.append('allow_download', 'true');
     }
+    fd.append('title', val('sTitle').trim() || modelName || 'Untitled'); fd.append('config', JSON.stringify(stage.getConfig()));
+    fd.append('expires_in_days', val('sExpiry')); fd.append('password', $('#sUsePw').checked ? val('sPass') : '');
+    if (editing && $('#sUpdate').checked) fd.append('update_id', editing.id);
+    fd.append('kind', 'images'); fd.append('watermark', val('iWm').trim());
+    fd.append('pack', await buildPack(P, (f, blob) => {
+      $('#iBar').value = f * 100; $('#iPct').textContent = Math.round(f * 100) + '%'; setFill((4 + .9 * f) / (STEPS.length - 1)); // the timeline creeps toward step 6
+      const url = URL.createObjectURL(blob); $('#pvImg').src = url; if (prev) URL.revokeObjectURL(prev); prev = url;
+    }), 'pack.s3im');
+    status('Uploading to your Google Drive…'); setFill(.98);
     const r = await call('/api/projects/share', { method: 'POST', body: fd });
     const url = location.origin + r.url; $('#sUrl').value = url;
     $('#sEmbed').value = `<iframe src="${url}" width="640" height="480" style="border:0" allow="fullscreen" allowfullscreen></iframe>`;
-    show('sResult'); showQr(url);
-  } catch (e) { $('#sErr').textContent = e.message; show('sErr'); }
-  b.disabled = false;
-});
+    goStep(6); showQr(url);
+  } catch (e) { goStep(5, e.message === 'Cancelled' ? 'Cancelled. Go back to change the settings.' : e.message); }
+  if (prev) URL.revokeObjectURL(prev);
+}
 
 // ---------- my projects ----------
 async function editProject(id) {
@@ -330,7 +343,7 @@ async function projects() {
     cell.append(
       b('Copy link', () => navigator.clipboard?.writeText(location.origin + '/v/' + p.share_id).then(() => toast('Link copied'))),
       b('Open', () => window.open('/v/' + p.share_id, '_blank', 'noopener')),
-      b('Edit', () => editProject(p.share_id)),
+      Object.assign(b('Edit', () => editProject(p.share_id)), p.has_model ? {} : { disabled: true, title: 'Published without the model download, so it cannot be reopened' }),
       b(p.revoked ? 'Restore' : 'Revoke', run(() => call('/api/projects/' + p.share_id, { method: 'PATCH', headers: json, body: JSON.stringify({ revoked: !p.revoked }) }))),
       b('Expiry/password', run(async () => {
         const d = prompt('Expire after how many days? (0 = never)', '0'); if (d === null) return;

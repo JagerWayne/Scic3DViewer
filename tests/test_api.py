@@ -469,3 +469,20 @@ def test_bad_image_packs_are_refused():
     r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", "kind": "images"})
     assert r.status_code == 400                                                       # no pack at all
     assert not list(db.SHARES.glob("*.pack"))                                          # nothing left on this server
+
+
+def test_picture_link_stores_the_model_only_when_downloads_are_allowed():
+    h = pro("img6@x.com")
+    post = lambda **d: c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}", "kind": "images", **d})
+    r = post()                                                                        # no download: no model is uploaded at all
+    assert r.status_code == 200
+    assert not any(".glb.gz" in k for k in cloud) and any(".pack" in k for k in cloud)
+    sid = r.json()["share_id"]
+    assert c.get(f"/api/projects/{sid}/model").status_code == 404
+    assert c.get(f"/api/projects/{sid}/edit-model", headers=h).status_code == 404
+    row = next(p for p in c.get("/api/projects", headers=h).json() if p["share_id"] == sid)
+    assert row["has_model"] is False and row["kind"] == "images"
+    assert post(allow_download="true").status_code == 400                             # downloads need the model file
+    assert c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}"}).status_code == 400   # 3D links need it too
+    sid2 = share_images(h, allow_download="true").json()["share_id"]
+    assert next(p for p in c.get("/api/projects", headers=h).json() if p["share_id"] == sid2)["has_model"] is True

@@ -134,14 +134,27 @@
 
 <div id="shareModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
   <div class="glass rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
-    <h2 class="text-lg font-bold">Share link</h2>
-    <label class="text-xs">Title<input class="inp" id="sTitle" maxlength="120" value="Untitled"></label>
-    <fieldset class="flex flex-col gap-1 text-sm" id="sKind">
-      <label><input type="radio" name="sKindR" value="model" checked> Interactive 3D <span class="text-xs text-slate-400">(visitors receive the 3D model)</span></label>
-      <label><input type="radio" name="sKindR" value="images"> 360&deg; pictures <span class="text-xs text-slate-400">(view-only: visitors only receive pictures, never the model)</span></label>
-    </fieldset>
-    <div id="sImg" class="hidden flex flex-col gap-2">
-      <label class="text-xs">Picture quality<select class="inp" id="iPreset"></select></label>
+    <div class="tl" id="tl" aria-hidden="true"><div class="tl-fill" id="tlFill"></div>
+      <span class="tl-dot" title="Share title">1</span><span class="tl-dot" title="Download permissions">2</span><span class="tl-dot" title="Export quality">3</span>
+      <span class="tl-dot" title="Expiry">4</span><span class="tl-dot" title="Processing">5</span><span class="tl-dot" title="Publish">6</span>
+    </div>
+    <h2 class="text-lg font-bold" id="wizTitle">Share title</h2>
+
+    <section data-step="1" class="flex flex-col gap-3">
+      <label class="text-xs">Share title<input class="inp" id="sTitle" maxlength="120" placeholder="Defaults to the name of your file"></label>
+      <label class="text-sm"><input type="checkbox" id="sUsePw"> Protect this link with a password</label>
+      <label class="text-xs hidden" id="sPassRow">Password<input class="inp" id="sPass" type="password" maxlength="64" autocomplete="new-password" placeholder="min. 4 characters"></label>
+      <label class="text-sm hidden" id="sUpdateRow"><input type="checkbox" id="sUpdate" checked> Update the existing link (same address) <span class="text-xs text-slate-400" id="sEditing"></span></label>
+    </section>
+
+    <section data-step="2" class="hidden flex flex-col gap-3">
+      <p class="text-sm text-slate-300">Should visitors be able to download the 3D model?</p>
+      <label class="text-sm"><input type="checkbox" id="pDl"> Yes, visitors can download the model (.glb)</label>
+      <p class="text-xs text-slate-400">If you tick this, the model file is also uploaded to your Google Drive. If not, only the pictures are stored, and this link can no longer be reopened for editing.</p>
+    </section>
+
+    <section data-step="3" class="hidden flex flex-col gap-2">
+      <label class="text-xs">Export quality<select class="inp" id="iPreset"></select></label>
       <div id="iCustom" class="hidden grid grid-cols-3 gap-2">
         <label class="text-xs">Shots around<input class="inp" id="iAz" type="number" min="4" step="1"></label>
         <label class="text-xs">Heights<input class="inp" id="iEl" type="number" min="1" step="1"></label>
@@ -152,26 +165,28 @@
       </div>
       <label class="text-xs hidden" id="iWmRow">Your watermark text (optional)<input class="inp" id="iWm" maxlength="40" placeholder="e.g. &copy; Your Studio"></label>
       <p class="text-xs text-slate-400" id="iInfo"></p>
-      <div id="iProg" class="hidden flex items-center gap-2 text-xs"><progress id="iBar" max="100" value="0" class="flex-1"></progress><span id="iPct">0%</span><button class="btn" id="iCancel" type="button">Cancel</button></div>
-    </div>
-    <fieldset class="flex flex-col gap-2 text-sm" id="sPerms">
-      <label><input type="checkbox" id="pDl"> <span id="pDlText">Allow multi-format 3D download</span></label>
-      <label><input type="checkbox" id="pMeasure"> Enable ruler &amp; angle/thickness caliper</label>
-      <label><input type="checkbox" id="pExplode"> Enable exploded view slider</label>
-    </fieldset>
-    <div class="grid grid-cols-2 gap-2">
+    </section>
+
+    <section data-step="4" class="hidden flex flex-col gap-3">
       <label class="text-xs">Link expires<select class="inp" id="sExpiry"><option value="0">Never</option><option value="1">After 1 day</option><option value="7">After 7 days</option><option value="30">After 30 days</option><option value="90">After 90 days</option><option value="365">After 1 year</option></select></label>
-      <label class="text-xs">Password (optional)<input class="inp" id="sPass" type="password" maxlength="64" autocomplete="new-password" placeholder="min. 4 characters"></label>
-    </div>
-    <label class="text-sm hidden" id="sUpdateRow"><input type="checkbox" id="sUpdate" checked> Update the existing link (same address) <span class="text-xs text-slate-400" id="sEditing"></span></label>
-    <p class="text-xs text-amber-400 hidden" id="sNote"></p>
-    <div id="sResult" class="hidden flex flex-col gap-2">
+    </section>
+
+    <section data-step="5" class="hidden flex flex-col gap-2">
+      <div id="pvBox" class="rounded-lg overflow-hidden mx-auto w-full" style="aspect-ratio:1;max-height:240px"><img id="pvImg" alt="Preview of the picture being made" class="w-full h-full object-contain"></div>
+      <div class="flex items-center gap-2 text-xs"><progress id="iBar" max="100" value="0" class="flex-1"></progress><span id="iPct">0%</span></div>
+      <p class="text-xs text-slate-300" id="pvStatus">Preparing&hellip;</p>
+      <button class="btn" id="iCancel" type="button">Cancel</button>
+    </section>
+
+    <section data-step="6" id="sResult" class="hidden flex flex-col gap-2">
       <div class="flex gap-2"><input class="inp" id="sUrl" readonly><button class="btn" id="sCopy">Copy</button><button class="btn btn-p hidden" id="sNative">Share…</button></div>
       <div class="flex gap-3 items-start"><img id="sQr" alt="QR code of the link" class="rounded bg-white p-1 hidden" width="110" height="110">
         <div class="flex-1 flex flex-col gap-1"><span class="text-xs text-slate-400">Embed on a website</span><textarea class="inp text-xs" id="sEmbed" rows="3" readonly></textarea><button class="btn" id="sCopyEmbed">Copy embed code</button></div></div>
-    </div>
+    </section>
+
+    <p class="text-xs text-amber-400 hidden" id="sNote"></p>
     <p class="text-xs text-red-400 hidden" id="sErr"></p>
-    <div class="row"><button class="btn" id="sClose">Close</button><button class="btn btn-p" id="sGo">Publish</button></div>
+    <div class="row"><button class="btn" id="sClose">Close</button><span class="flex-1"></span><button class="btn hidden" id="sBack">Back</button><button class="btn btn-p" id="sNext">Next</button></div>
   </div>
 </div>
 

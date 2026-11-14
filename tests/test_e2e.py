@@ -37,6 +37,36 @@ def server():
     srv.should_exit = True; t.join(5); mp.undo()
 
 
+SMALL = dict(iAz=8, iEl=2, iPx=256, iQ=70, iElMin=10, iElMax=40)  # Enterprise "Custom": a tiny pack keeps tests fast
+
+
+def run_wizard(page, title=None, custom=None, download=False):
+    """Click through the 6-step sharing wizard and return the link."""
+    page.click("#share")
+    if title:
+        page.fill("#sTitle", title)
+    page.click("#sNext")                      # 1 title -> 2 download
+    if download:
+        page.check("#pDl")
+    page.click("#sNext")                      # 2 -> 3 quality
+    if custom:
+        page.select_option("#iPreset", "custom")
+        for k, v in custom.items():
+            page.fill("#" + k, str(v))
+        page.fill("#iWm", "(c) E2E Studio")
+    page.click("#sNext")                      # 3 -> 4 expiry
+    page.click("#sNext")                      # 4 -> 5 processing starts
+    page.wait_for_selector("#sResult:not(.hidden)", timeout=180000)   # 6 publish
+    return page.input_value("#sUrl")
+
+
+def make_interactive_link(studio):  # the wizard publishes picture links; the 3D link type is still served, so make one through the API
+    return studio.evaluate("""async () => { const fd = new FormData(); fd.append('model', await stage.exportAs('glb'), 'm.glb');
+        fd.append('config', JSON.stringify(stage.getConfig())); fd.append('title', 'Interactive');
+        const r = await fetch('/api/projects/share', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.scic_token }, body: fd });
+        return location.origin + (await r.json()).url; }""")
+
+
 def test_studio_publish_projects_and_viewer(server):
     token = db.login_google("E2E User", "e2e@x.com", "test")[0]
     with sync_playwright() as p:
@@ -50,10 +80,12 @@ def test_studio_publish_projects_and_viewer(server):
         studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
         studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
 
-        studio.click("#share"); studio.fill("#sTitle", "E2E model"); studio.click("#sGo")
-        studio.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
-        url = studio.input_value("#sUrl")
+        studio.click("#share")
+        assert studio.input_value("#sTitle") == "" and studio.get_attribute("#sTitle", "placeholder") == "cube"   # defaults to the file name
+        studio.click("#sClose")
+        url = run_wizard(studio, title="E2E model")
         assert "/v/" in url and "iframe" in studio.input_value("#sEmbed")
+        assert studio.locator("#tl .tl-dot.done").count() == 5                              # the timeline has moved all the way
 
         studio.click("#sClose"); studio.click("#projects")
         studio.wait_for_selector("#projRows tr", timeout=10000)
@@ -62,7 +94,7 @@ def test_studio_publish_projects_and_viewer(server):
         viewer = ctx.new_page(); viewer.on("pageerror", lambda e: errors.append(str(e)))
         viewer.goto(url)
         viewer.wait_for_function("document.title === 'E2E model'", timeout=30000)
-        viewer.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
+        viewer.wait_for_function("document.querySelector('#stage canvas') && document.querySelector('#stage canvas').width > 1", timeout=30000)
         assert not errors, errors
         browser.close()
 
@@ -83,11 +115,13 @@ def test_share_dialog_on_a_phone(server):
         assert [shown(s) for s in ("#panel", "#tools", "#tour")] == ["none"] * 3         # windows behind the dialog are hidden
         card = page.locator("#shareModal .modal-card").bounding_box()
         assert card["width"] >= 388 and card["y"] > 0                                    # a full-width bottom sheet
-        go = page.locator("#sGo").bounding_box()
+        go = page.locator("#sNext").bounding_box()
         assert go["height"] >= 44 and go["y"] + go["height"] <= 844                      # thumb-sized, always on screen
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")       # no sideways scrolling
-        page.click("#sGo")
-        page.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
+        for _ in range(3):                                                               # every step fits the phone
+            page.click("#sNext"); assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.click("#sNext")
+        page.wait_for_selector("#sResult:not(.hidden)", timeout=180000)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.click("#sClose")
         assert shown("#tools") != "none"                                                 # everything is back after closing
@@ -136,9 +170,7 @@ def test_viewer_parts_panel_starts_closed_and_can_be_opened(server):
         studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
         studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
         studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
-        studio.click("#share"); studio.click("#sGo")
-        studio.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
-        url = studio.input_value("#sUrl")
+        url = make_interactive_link(studio)
         for name, ctx in (("desktop", dict(viewport={"width": 1280, "height": 800})),
                           ("phone", dict(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True))):
             page = browser.new_context(bypass_csp=True, **ctx).new_page()
@@ -198,22 +230,14 @@ def test_admin_page_only_for_the_admin(server):
         browser.close()
 
 
-def publish_images(browser, token, custom=None):
+def publish_images(browser, token, custom=None, download=False):
     studio = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}).new_page()
     studio.add_init_script(f"localStorage.setItem('scic_token','{token}')")
     studio.goto(BASE + "/studio")
     studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
     studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
     studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
-    studio.click("#share"); studio.check("input[name=sKindR][value=images]")
-    if custom:  # Enterprise fine-tuning: a tiny pack keeps the test fast
-        studio.select_option("#iPreset", "custom")
-        for k, v in custom.items():
-            studio.fill("#" + k, str(v))
-        studio.fill("#iWm", "(c) E2E Studio")
-    studio.click("#sGo")
-    studio.wait_for_selector("#sResult:not(.hidden)", timeout=180000)
-    return studio.input_value("#sUrl")
+    return run_wizard(studio, custom=custom, download=download)
 
 
 def test_image_link_viewer_has_no_3d_and_rotates_with_the_mouse(server):
@@ -221,7 +245,7 @@ def test_image_link_viewer_has_no_3d_and_rotates_with_the_mouse(server):
     token = db.login_google("Ent User", "ent@x.com", "test")[0]
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
-        url = publish_images(browser, token, dict(iAz=8, iEl=2, iPx=256, iQ=70, iElMin=10, iElMax=40))
+        url = publish_images(browser, token, SMALL)
         viewer, reqs, errors = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page(), [], []
         viewer.on("request", lambda r: reqs.append(r.url)); viewer.on("pageerror", lambda e: errors.append(str(e)))
         viewer.goto(url)

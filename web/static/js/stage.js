@@ -659,7 +659,7 @@ export class Stage extends EventTarget {
           const p = new V3(...n.point), v = cam.position.clone().sub(p).normalize(), q = p.clone().project(cam);
           return [+((q.x + 1) / 2).toFixed(3), +((1 - q.y) / 2).toFixed(3), +(q.z < 1 && v.dot(new V3(...n.normal)) > .05)];
         }));
-        onProgress?.((e * az + a + 1) / (az * el));
+        onProgress?.((e * az + a + 1) / (az * el), blobs[blobs.length - 1]);
       }
     } finally {
       cam.position.copy(keep.pos); tgt.copy(keep.tgt); cam.near = keep.near; cam.far = keep.far;

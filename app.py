@@ -228,7 +228,7 @@ def check_access(r, request: Request):
 
 
 @app.post("/api/projects/share")
-async def share(request: Request, model: UploadFile = File(...), config: str = Form("{}"),
+async def share(request: Request, model: UploadFile | None = File(None), config: str = Form("{}"),
                 title: str = Form("Untitled", max_length=120), allow_download: bool = Form(False),
                 allow_measure: bool = Form(False), allow_explode: bool = Form(False),
                 update_id: str = Form(""), expires_in_days: int = Form(0, ge=0, le=3650),
@@ -267,9 +267,13 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
             raise HTTPException(400, "Image links need the rendered image pack")
         flags["allow_measure"] = flags["allow_explode"] = False  # these need real 3D geometry, which image links never send
         hdr = None
-    if await model.read(4) != b"glTF":
-        raise HTTPException(400, "Model must be a binary .glb")
-    await model.seek(0)
+    has_model = model is not None and bool(model.filename)  # picture links only keep the model when visitors may download it
+    if (kind == "model" or allow_download) and not has_model:
+        raise HTTPException(400, "The model file is missing")
+    if has_model:
+        if await model.read(4) != b"glTF":
+            raise HTTPException(400, "Model must be a binary .glb")
+        await model.seek(0)
     sid = update_id or secrets.token_urlsafe(9)
     if kind == "images":
         try:
@@ -279,14 +283,16 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
             raise
     dest, size = db.SHARES / f"{sid}.glb", 0
     try:
-        with open(dest, "wb") as f:
-            while chunk := await model.read(db.MB):
-                size += len(chunk)
-                if size > tier["max_mb"] * db.MB:
-                    raise HTTPException(413, f"{u['tier']} tier limit is {tier['max_mb']} MB")
-                f.write(chunk)
+        if has_model:
+            with open(dest, "wb") as f:
+                while chunk := await model.read(db.MB):
+                    size += len(chunk)
+                    if size > tier["max_mb"] * db.MB:
+                        raise HTTPException(413, f"{u['tier']} tier limit is {tier['max_mb']} MB")
+                    f.write(chunk)
     except BaseException:
         dest.unlink(missing_ok=True)
+        (db.SHARES / f"{sid}.pack").unlink(missing_ok=True)
         raise
     if hdr is not None and hdr.filename:  # optional custom environment map
         data = await hdr.read(20 * db.MB + 1)
@@ -296,7 +302,8 @@ async def share(request: Request, model: UploadFile = File(...), config: str = F
         (db.SHARES / f"{sid}.hdr").write_bytes(data)
     drive = {}  # data/shares is only a short-lived staging area: files move to Drive and the local copy is removed
     try:
-        await run_in_threadpool(_gzip, dest, db.SHARES / f"{sid}.glb.gz")
+        if has_model:
+            await run_in_threadpool(_gzip, dest, db.SHARES / f"{sid}.glb.gz")
         for key, fname in (("glbz", f"{sid}.glb.gz"), ("hdr", f"{sid}.hdr"), ("pack", f"{sid}.pack")):
             p = db.SHARES / fname
             if p.exists():
@@ -344,9 +351,14 @@ def my_projects(u=Depends(current_user)):
     ids = db.license_ids(u["email"])
     with db.connect() as c:
         rows = c.execute(f"SELECT share_id,title,kind,created_at,views,allow_download,allow_measure,allow_explode,expires_at,"
-                         f"revoked,pw_hash IS NOT NULL AS locked FROM shares WHERE license_id IN ({','.join('?' * len(ids))}) "
+                         f"revoked,pw_hash IS NOT NULL AS locked,drive_ids FROM shares WHERE license_id IN ({','.join('?' * len(ids))}) "
                          f"ORDER BY created_at DESC", ids).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r); fids = json.loads(d.pop("drive_ids") or "{}")
+        d["has_model"] = "glbz" in fids or "glb" in fids  # links published without a model download cannot be reopened for editing
+        out.append(d)
+    return out
 
 
 @app.patch("/api/projects/{share_id}")

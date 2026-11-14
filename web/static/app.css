@@ -53,3 +53,13 @@ details.sec>div{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
 
 /* image (360) share links have no 3D tools */
 body.images #panelBtn,body.images #panel,body.images #tools,body.images #tour{display:none!important}
+
+/* sharing wizard: a moving timeline, the blue line slides from step to step */
+.tl{position:relative;display:flex;justify-content:space-between;margin:2px 0 4px}
+.tl:before{content:"";position:absolute;left:13px;right:13px;top:11px;height:3px;background:rgba(148,163,184,.25);border-radius:2px}
+.tl-fill{position:absolute;left:13px;top:11px;height:3px;width:0;background:#0ea5e9;border-radius:2px;transition:width .5s ease}
+.tl-dot{position:relative;z-index:1;width:26px;height:26px;border-radius:50%;background:#1e293b;border:2px solid #475569;display:grid;place-items:center;font-size:11px;color:#94a3b8;transition:background .3s,border-color .3s,color .3s}
+.tl-dot.done{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
+.tl-dot.now{border-color:#38bdf8;color:#fff;animation:tlpulse 1.4s ease-in-out infinite}
+@keyframes tlpulse{0%,100%{box-shadow:0 0 0 3px rgba(14,165,233,.35)}50%{box-shadow:0 0 0 7px rgba(14,165,233,.08)}}
+@media (prefers-reduced-motion:reduce){.tl-fill{transition:none}.tl-dot.now{animation:none}}
