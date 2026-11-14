@@ -36,7 +36,7 @@ def init():
     with connect() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS licenses(
-          id INTEGER PRIMARY KEY, key_hash TEXT UNIQUE NOT NULL, name TEXT, surname TEXT,
+          id INTEGER PRIMARY KEY, key_hash TEXT UNIQUE NOT NULL, name TEXT,
           email TEXT NOT NULL, tier TEXT NOT NULL, duration_days INTEGER,
           activated_at INTEGER, expires_at INTEGER, revoked INTEGER DEFAULT 0, created_at INTEGER);
         CREATE TABLE IF NOT EXISTS sessions(
@@ -54,6 +54,12 @@ def init():
         for col, typ in (("paused_at", "INTEGER"), ("note", "TEXT")):  # paused: access off, clock frozen; note: admin-only memo
             if col not in lhave:
                 c.execute(f"ALTER TABLE licenses ADD COLUMN {col} {typ}")
+        if "surname" in lhave:  # older databases: fold the surname into the single "Name & Surname" field, then drop the column
+            c.execute("UPDATE licenses SET name = TRIM(COALESCE(name, '') || ' ' || surname) WHERE surname IS NOT NULL AND surname NOT IN ('', '(customer)')")
+            try:
+                c.execute("ALTER TABLE licenses DROP COLUMN surname")
+            except sqlite3.OperationalError:  # SQLite older than 3.35 cannot drop columns: the unused column simply stays
+                pass
         have = {r[1] for r in c.execute("PRAGMA table_info(shares)")}
         for col, typ in (("drive_ids", "TEXT"),            # JSON {"glbz": id, "hdr": id}  (legacy: "glb")
                          ("expires_at", "INTEGER"), ("revoked", "INTEGER DEFAULT 0"), ("pw_hash", "TEXT")):
@@ -68,10 +74,10 @@ def h(s: str) -> str:
 def delete_license(lid: int):
     """Remove one paid license. The person keeps their account: shares and Drive login move to their Free license."""
     with connect() as c:
-        r = c.execute("SELECT email FROM licenses WHERE id=? AND surname IS NOT NULL", (lid,)).fetchone()
+        r = c.execute("SELECT email FROM licenses WHERE id=? AND duration_days IS NOT NULL", (lid,)).fetchone()
         if not r:
             return False
-        free = c.execute("SELECT id FROM licenses WHERE email=? AND surname IS NULL", (r["email"],)).fetchone()
+        free = c.execute("SELECT id FROM licenses WHERE email=? AND duration_days IS NULL", (r["email"],)).fetchone()
         has_data = c.execute("SELECT (SELECT COUNT(*) FROM shares WHERE license_id=?) + (SELECT COUNT(*) FROM drive_tokens WHERE license_id=?)",
                              (lid, lid)).fetchone()[0]
         if free:
@@ -118,15 +124,14 @@ def parse_duration(s: str) -> int:
     return int(m[1]) * {"d": 1, "m": 30, "y": 365}[m[2]]
 
 
-def create_license(name, surname, email, tier, duration) -> str:
+def create_license(name, email, tier, duration) -> str:  # name = "Name & Surname"
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError("tier must be one of " + ", ".join(TIERS))
     key = new_key()
     with connect() as c:
-        c.execute("INSERT INTO licenses(key_hash,name,surname,email,tier,duration_days,created_at)"
-                  " VALUES(?,?,?,?,?,?,?)",
-                  (h(key), name, surname, email.lower(), tier, parse_duration(duration), int(time.time())))
+        c.execute("INSERT INTO licenses(key_hash,name,email,tier,duration_days,created_at) VALUES(?,?,?,?,?,?)",
+                  (h(key), name, email.lower(), tier, parse_duration(duration), int(time.time())))
     return key
 
 
@@ -148,13 +153,13 @@ def login_google(name, email, ip):
     email, now = email.strip().lower(), int(time.time())
     name = (name or email.split("@")[0]).strip()[:80]
     with connect() as c:
-        lic = c.execute("SELECT * FROM licenses WHERE email=? AND revoked=0 AND paused_at IS NULL AND surname IS NOT NULL "
+        lic = c.execute("SELECT * FROM licenses WHERE email=? AND revoked=0 AND paused_at IS NULL AND duration_days IS NOT NULL "
                         "AND (expires_at IS NULL OR expires_at>?) ORDER BY id DESC", (email, now)).fetchone()
         if lic and not lic["activated_at"]:  # duration starts counting at first activation
             c.execute("UPDATE licenses SET activated_at=?, expires_at=? WHERE id=?",
                       (now, now + lic["duration_days"] * 86400, lic["id"]))
         if not lic:  # no valid paid license: the (single) Free license of this email
-            lic = c.execute("SELECT * FROM licenses WHERE email=? AND surname IS NULL", (email,)).fetchone()
+            lic = c.execute("SELECT * FROM licenses WHERE email=? AND duration_days IS NULL", (email,)).fetchone()
         if not lic:
             c.execute("INSERT INTO licenses(key_hash,name,email,tier,created_at) VALUES(?,?,?,?,?)",
                       (h(secrets.token_hex(16)), name, email, "FREE", now))

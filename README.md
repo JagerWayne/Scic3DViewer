@@ -32,7 +32,7 @@ Sign in to `/studio` with the admin Google account (`waynescicluna.1985@gmail.co
 setting), then click **Admin** in the top bar or open `/admin`. The admin gets the Enterprise tier automatically. Tabs:
 
 * **Overview**: people, paid/pending/expiring licenses, links, views, connected drives, a 14-day activity chart, system status (Google, email, Stripe).
-* **Licenses**: search and filter; create a license (name, surname, Google email, tier, duration) and optionally email it. **Edit** opens a dialog for name, surname, email, tier, expiry date (or duration before the first sign-in), an admin note, quick buttons (+30 days, +1 year, Pause/Resume, Revoke/Restore, resend email) and a Danger zone. **Pause** gives the person the Free tier and freezes the clock (the paused time is added back on Resume); **Revoke** blocks for good. **Delete** removes the license only (the person keeps account and links); **Delete person and all data** also removes links (and the files in their Drive), Drive login, sessions and log, after typing the email. The admin account cannot be deleted.
+* **Licenses**: search and filter. **Give a license** to anyone who has signed in: click **Give license** on a Free row (or **Edit**), choose Free, Pro or Enterprise and the length, **Save**; it applies to them right away. **+ New license** prepares one for an email that has not signed in yet (the clock starts at their first sign-in, or tick *Start the license clock now*). **Edit** changes Name & Surname, email, tier, **status** (Active, Paused or Revoked, any can be switched to any other), expiry date or duration, an admin note, and has quick buttons (+30 days, +1 year, Pause/Resume, Revoke/Restore, resend email) and a Danger zone. **Pause** gives the Free tier and freezes the clock (the paused time is added back on Resume); **Revoke** blocks for good. **Delete** removes the license only (the person keeps account and links); **Delete person and all data** also removes links (and the files in their Drive), Drive login, sessions and log, after typing the email. The admin account cannot be deleted.
 * **Shared links**: every link with owner, views and status; revoke, restore or delete (also deletes the file from the owner Drive).
 * **Activity**: searchable log of sign-ins, shares, views and admin actions.
 
@@ -49,7 +49,7 @@ itself being reachable by anyone does not matter.
 ## Licenses (admin only, local CLI, the admin panel does the same)
 
 ```bash
-python admin.py new                       # prompts: name, surname, email, tier, duration (30d / 6m / 1y)
+python admin.py new                       # prompts: Name & Surname, email, tier, duration (30d / 6m / 1y)
 python admin.py list
 python admin.py upgrade user@mail.com PRO
 python admin.py revoke  user@mail.com

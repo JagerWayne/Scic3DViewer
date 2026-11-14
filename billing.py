@@ -66,7 +66,7 @@ def register(app, current_user, rate_limit):
             if not seen and meta.get("plan") in PRICES and meta.get("email"):
                 tier, dur = meta["plan"].split(":")
                 name = (obj.get("customer_details") or {}).get("name") or meta["email"].split("@")[0]
-                db.create_license(name, "(customer)", meta["email"], tier, dur)
+                db.create_license(name, meta["email"], tier, dur)
                 db.log(0, "purchase", "", sid)
                 try:
                     mailer.send(meta["email"], "Your Scic3DViewer license is active",

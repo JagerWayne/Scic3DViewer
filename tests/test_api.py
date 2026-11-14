@@ -46,7 +46,7 @@ def test_free_flow_and_gating():
 
 
 def test_license_follows_the_google_email():
-    db.create_license("Bob", "B", "pro@x.com", "PRO", "30d")
+    db.create_license("Bob B", "pro@x.com", "PRO", "30d")
     assert tier(login("other@x.com")) == "FREE"                    # someone else's email gets nothing
     h = login("PRO@x.com")                                         # case-insensitive match, clock starts now
     me = c.get("/api/me", headers=h).json()
@@ -128,7 +128,7 @@ def test_drive_follows_license_change():
     h = login("mv@x.com"); lid_free = db.session_user(h["Authorization"][7:])["license_id"]
     with db.connect() as con:
         con.execute("INSERT INTO drive_tokens VALUES(?,?,?)", (lid_free, "enc", 1))
-    db.create_license("M", "V", "mv@x.com", "PRO", "30d")
+    db.create_license("M V", "mv@x.com", "PRO", "30d")
     lid_pro = db.session_user(login("mv@x.com")["Authorization"][7:])["license_id"]
     assert lid_pro != lid_free
     with db.connect() as con:
@@ -182,7 +182,7 @@ def test_upload_releases_the_local_file(monkeypatch, tmp_path):  # Windows canno
 
 
 def pro(email):
-    db.create_license("P", "P", email, "PRO", "30d")
+    db.create_license("P P", email, "PRO", "30d")
     return login(email)
 
 
@@ -243,7 +243,7 @@ def test_admin_panel(monkeypatch):
     adm = login("WayneScicluna.1985@gmail.com")                                       # same Google account, any letter case
     me = c.get("/api/me", headers=adm).json()
     assert me["is_admin"] and me["tier"] == "ENTERPRISE" and not c.get("/api/me", headers=login("x9@x.com")).json()["is_admin"]
-    new = {"name": "Zed", "surname": "Z", "email": "zed@x.com", "tier": "PRO", "duration": "30d"}
+    new = {"name": "Zed Z", "email": "zed@x.com", "tier": "PRO", "duration": "30d"}
     assert c.post("/api/admin/licenses", headers=adm, json=new).status_code == 200
     assert c.post("/api/admin/licenses", headers=adm, json={**new, "tier": "GOLD"}).status_code == 400
     assert c.post("/api/admin/licenses", headers=adm, json={**new, "email": "nope"}).status_code == 422
@@ -272,14 +272,15 @@ def test_admin_panel(monkeypatch):
 
 def test_admin_edits_and_pauses_licenses():
     adm = login(db.ADMIN_EMAIL)
-    c.post("/api/admin/licenses", headers=adm, json={"name": "Ed", "surname": "It", "email": "ed@x.com", "tier": "PRO", "duration": "30d"})
+    c.post("/api/admin/licenses", headers=adm, json={"name": "Ed It", "email": "ed@x.com", "tier": "PRO", "duration": "30d"})
     rows = lambda: c.get("/api/admin/licenses", headers=adm).json()
-    lic = lambda email, paid=True: next(x for x in rows() if x["email"] == email and bool(x["surname"]) == paid)
+    lic = lambda email, paid=True: next(x for x in rows() if x["email"] == email and x["managed"] == paid)
     lid = lic("ed@x.com")["id"]
     patch = lambda lid_=None, **b: c.patch(f"/api/admin/licenses/{lid_ or lid}", headers=adm, json=b)
-    assert patch(name="Edward", surname="Itt", note="vip", duration_days=90, tier="ENTERPRISE").status_code == 200
+    assert patch(name="Edward Itt", note="vip", duration_days=90, tier="ENTERPRISE").status_code == 200
     l = lic("ed@x.com")
-    assert (l["name"], l["surname"], l["note"], l["duration_days"], l["tier"], l["status"]) == ("Edward", "Itt", "vip", 90, "ENTERPRISE", "pending")
+    assert (l["name"], l["note"], l["duration_days"], l["tier"], l["status"]) == ("Edward Itt", "vip", 90, "ENTERPRISE", "pending")
+    assert "surname" not in l                                                     # one field: "Name & Surname"
     assert patch(expires_on="2030-01-31").status_code == 400                      # the clock has not started yet
     h = login("ed@x.com")
     assert tier(h) == "ENTERPRISE" and lic("ed@x.com")["status"] == "active"      # the first sign-in starts the clock
@@ -303,16 +304,54 @@ def test_admin_edits_and_pauses_licenses():
     assert patch(99999, name="x").status_code == 404
 
 
+def test_admin_gives_a_license_to_an_existing_free_account():
+    adm = login(db.ADMIN_EMAIL)
+    h = login("gift@x.com")                                                       # someone who simply signed in: Free
+    assert tier(h) == "FREE"
+    rows = lambda: c.get("/api/admin/licenses", headers=adm).json()
+    row = next(x for x in rows() if x["email"] == "gift@x.com")
+    assert row["managed"] is False and row["status"] == "free"
+    patch = lambda **b: c.patch(f"/api/admin/licenses/{row['id']}", headers=adm, json=b)
+    assert patch(tier="PRO").status_code == 400                                   # a length is needed
+    assert patch(email="other@x.com").status_code == 400                          # the identity of an automatic account is fixed
+    assert patch(revoked=True).status_code == 400
+    assert patch(tier="PRO", duration_days=30).status_code == 200                 # the whole "give a license" step
+    assert tier(h) == "PRO"                                                       # applies to the open session at once
+    row = next(x for x in rows() if x["email"] == "gift@x.com")
+    assert row["managed"] and row["status"] == "active" and 29 * 86400 < row["expires_at"] - time.time() <= 30 * 86400
+    assert patch(tier="ENTERPRISE").status_code == 200 and tier(h) == "ENTERPRISE"
+    assert patch(paused=True).status_code == 200 and tier(h) == "FREE"
+    assert patch(paused=False, revoked=True).status_code == 200 and tier(h) == "FREE"
+    assert patch(revoked=False).status_code == 200 and tier(h) == "ENTERPRISE"    # every status can be changed back
+    assert patch(start_now=True).status_code == 400                               # it has already started
+
+
+def test_surname_is_folded_into_the_name_when_an_old_database_is_upgraded(monkeypatch, tmp_path):
+    import sqlite3
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    con = sqlite3.connect(tmp_path / "scic.db")
+    con.execute("CREATE TABLE licenses(id INTEGER PRIMARY KEY, key_hash TEXT UNIQUE NOT NULL, name TEXT, surname TEXT, email TEXT NOT NULL, "
+                "tier TEXT NOT NULL, duration_days INTEGER, activated_at INTEGER, expires_at INTEGER, revoked INTEGER DEFAULT 0, created_at INTEGER)")
+    con.executemany("INSERT INTO licenses(key_hash,name,surname,email,tier,duration_days) VALUES(?,?,?,?,?,?)",
+                    [("a", "Ada", "Lovelace", "a@x.com", "PRO", 30), ("b", "Stripe Buyer", "(customer)", "b@x.com", "PRO", 30), ("c", "Free Person", None, "c@x.com", "FREE", None)])
+    con.commit(); con.close()
+    db.init()
+    with db.connect() as con:
+        assert {r["email"]: r["name"] for r in con.execute("SELECT * FROM licenses")} == {"a@x.com": "Ada Lovelace", "b@x.com": "Stripe Buyer", "c@x.com": "Free Person"}
+        cols = [r[1] for r in con.execute("PRAGMA table_info(licenses)")]
+        assert "surname" not in cols or sqlite3.sqlite_version_info < (3, 35)     # old SQLite cannot drop the column, it just stays unused
+
+
 def test_admin_deletes_a_license_or_a_whole_person():
     adm = login(db.ADMIN_EMAIL)
     rows = lambda: c.get("/api/admin/licenses", headers=adm).json()
     for email in ("keep@x.com", "gone@x.com"):
-        c.post("/api/admin/licenses", headers=adm, json={"name": "N", "surname": "S", "email": email, "tier": "PRO", "duration": "30d"})
-    paid = lambda email: next(x["id"] for x in rows() if x["email"] == email and x["surname"])
+        c.post("/api/admin/licenses", headers=adm, json={"name": "N S", "email": email, "tier": "PRO", "duration": "30d"})
+    paid = lambda email: next(x["id"] for x in rows() if x["email"] == email and x["managed"])
     # delete only the license: the person keeps the account, the link and the Drive file
     keep = login("keep@x.com"); sid = share(keep).json()["share_id"]
     assert c.delete(f"/api/admin/licenses/{paid('keep@x.com')}", headers=adm).status_code == 200
-    assert not any(x["email"] == "keep@x.com" and x["surname"] for x in rows())
+    assert not any(x["email"] == "keep@x.com" and x["managed"] for x in rows())
     assert c.get("/api/me", headers=keep).status_code == 401                      # the session of the deleted license ended
     again = login("keep@x.com")
     assert tier(again) == "FREE" and [p["share_id"] for p in c.get("/api/projects", headers=again).json()] == [sid] and cloud

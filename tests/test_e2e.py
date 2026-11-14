@@ -96,8 +96,8 @@ def test_share_dialog_on_a_phone(server):
 
 def test_admin_edits_pauses_and_deletes_a_license(server):
     adm = db.login_google("Boss", db.ADMIN_EMAIL, "test")[0]
-    db.create_license("Pat", "Pending", "pat@x.com", "PRO", "30d")
-    lic = lambda: db.connect().execute("SELECT * FROM licenses WHERE email='pat@x.com' AND surname IS NOT NULL").fetchone()
+    db.create_license("Pat Pending", "pat@x.com", "PRO", "30d")
+    lic = lambda: db.connect().execute("SELECT * FROM licenses WHERE email='pat@x.com' AND duration_days IS NOT NULL").fetchone()
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page, errors = browser.new_context(bypass_csp=True).new_page(), []
@@ -123,6 +123,37 @@ def test_admin_edits_pauses_and_deletes_a_license(server):
         row().get_by_role("button", name="Delete").click()
         page.wait_for_function("!document.querySelector('#lrows').innerText.includes('pat@x.com')", timeout=15000)
         assert lic() is None and not errors, errors
+        browser.close()
+
+
+def test_admin_gives_a_license_from_the_edit_page(server):
+    adm = db.login_google("Boss", db.ADMIN_EMAIL, "test")[0]
+    person = db.login_google("Gina Gift", "gina@x.com", "test")[0]                 # signed in once: a Free account
+    tier = lambda: db.session_user(person)["tier"]
+    assert tier() == "FREE"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = browser.new_context(bypass_csp=True).new_page(), []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(f"localStorage.setItem('scic_token','{adm}')")
+        page.goto(BASE + "/admin")
+        page.click("[data-tab=licenses]")
+        page.locator("#lrows tr", has_text="gina@x.com").get_by_role("button", name="Give license").click()
+        assert page.input_value("#eTier") == "PRO" and page.is_visible("#eDur") and page.is_visible("#eUnit")   # Pro + a length, ready to save
+        assert page.is_hidden("#eStatusWrap") and "Name & Surname" in page.inner_text("#editForm") and "Surname" not in page.inner_text("#eName")
+        page.fill("#eDur", "6"); page.select_option("#eUnit", "30")                 # 6 months
+        page.click("#editForm button:has-text('Save changes')")
+        page.wait_for_function("document.querySelector('#eTitle').textContent === 'Edit license'", timeout=15000)   # it is a license now
+        row = db.connect().execute("SELECT * FROM licenses WHERE email='gina@x.com' AND duration_days IS NOT NULL").fetchone()
+        assert row["tier"] == "PRO" and row["duration_days"] == 180 and row["activated_at"]
+        assert tier() == "PRO"                                                      # Gina has it without signing in again
+        page.select_option("#eTier", "ENTERPRISE"); page.select_option("#eStatusSel", "paused")
+        page.click("#editForm button:has-text('Save changes')")
+        page.wait_for_function("document.querySelector('#eStatus').innerText.includes('paused')", timeout=15000)
+        assert tier() == "FREE"                                                     # paused: Free for now
+        page.select_option("#eStatusSel", "active"); page.click("#editForm button:has-text('Save changes')")
+        page.wait_for_function("document.querySelector('#eStatus').innerText.includes('active')", timeout=15000)
+        assert tier() == "ENTERPRISE" and not errors, errors
         browser.close()
 
 

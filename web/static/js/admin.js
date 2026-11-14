@@ -48,14 +48,14 @@ let lics = [];
 async function licenses() { lics = await api('/licenses'); drawLicenses(); }
 function drawLicenses() {
   const q = $('#lq').value.trim().toLowerCase(), st = $('#lstatus').value;
-  const rows = lics.filter(l => (!st || l.status === st) && (!q || `${l.name} ${l.surname || ''} ${l.email}`.toLowerCase().includes(q)));
+  const rows = lics.filter(l => (!st || l.status === st) && (!q || `${l.name || ''} ${l.email}`.toLowerCase().includes(q)));
   $('#lrows').replaceChildren(...rows.map(l => {
-    const paid = l.surname !== null, reload = () => licenses().then(overview);
-    const actions = [btn('Edit', () => openEdit(l.id), 'btn btn-p'),
+    const paid = l.managed, reload = () => licenses().then(overview);
+    const actions = [btn('Edit', () => openEdit(l.id), paid ? 'btn btn-p' : 'btn'), !paid ? btn('Give license', () => openEdit(l.id, true), 'btn btn-p') : null,
       paid && l.status !== 'revoked' ? btn(l.paused_at ? 'Resume' : 'Pause', () => act(() => send('PATCH', '/licenses/' + l.id, { paused: !l.paused_at }).then(reload),
         l.paused_at ? 'Resumed: the paused time was added back' : 'Paused: Free tier for now, the clock is frozen')) : null,
       btn('Delete', () => deleteRow(l), 'btn btn-danger')];
-    return el('tr', { ondblclick: () => openEdit(l.id) }, el('td', {}, [l.name, l.surname].filter(Boolean).join(' '), l.note ? el('span', { title: l.note, className: 'ml-1', textContent: '📝' }) : null),
+    return el('tr', { ondblclick: () => openEdit(l.id) }, el('td', {}, l.name || '', l.note ? el('span', { title: l.note, className: 'ml-1', textContent: '📝' }) : null),
       el('td', { textContent: l.email }), el('td', { textContent: l.tier }), el('td', {}, pill(l.status)),
       el('td', { textContent: l.status === 'pending' ? `${l.duration_days} days after sign-in` : l.status === 'paused' ? `${date(l.expires_at)} (frozen)` : date(l.expires_at) }),
       el('td', { textContent: l.drive ? '✓' : '—' }), el('td', { textContent: String(l.shares) }), el('td', {}, ...actions));
@@ -74,29 +74,42 @@ async function purge(l) { // everything about one person: needs the email typed,
   await act(() => send('DELETE', `/licenses/${l.id}?purge=true`), 'Person deleted'); await licenses(); overview(); return true;
 }
 async function deleteRow(l) {
-  if (l.surname === null) return purge(l);
-  if (!confirm(`Delete the license of ${l.name} ${l.surname} (${l.email})?\n\nThey keep their account and links and go back to the Free tier.`)) return;
+  if (!l.managed) return purge(l);
+  if (!confirm(`Delete the license of ${l.name} (${l.email})?\n\nThey keep their account and links and go back to the Free tier.`)) return;
   await act(() => send('DELETE', '/licenses/' + l.id), 'License deleted'); await licenses(); overview();
 }
+function syncGive() { // a Free account becomes a license as soon as a tier and a length are chosen
+  const l = editing; if (!l || l.managed) return;
+  const give = $('#eTier').value !== 'FREE';
+  for (const id of ['eExpWrap', 'eUnitWrap', 'eGiveNote']) $('#' + id).classList.toggle('hidden', !give);
+}
 function fillEdit(l) {
-  editing = l; const paid = l.surname !== null, activated = !!l.activated_at;
-  $('#eTitle').textContent = paid ? 'Edit license' : 'Edit free account (automatic)'; $('#eStatus').replaceChildren(pill(l.status));
-  $('#eName').value = l.name || ''; $('#eSurname').value = l.surname || ''; $('#eEmail').value = l.email; $('#eTier').value = l.tier; $('#eNote').value = l.note || '';
-  for (const id of ['eSurname', 'eEmail', 'eTier', 'eExp', 'eDur']) $('#' + id).disabled = !paid;
-  $('#eExpWrap').classList.toggle('hidden', !paid); $('#eEmailNote').classList.toggle('hidden', !paid); $('#eDelLic').classList.toggle('hidden', !paid);
+  editing = l; const paid = l.managed, activated = !!l.activated_at;
+  $('#eTitle').textContent = paid ? 'Edit license' : 'Edit account (Free)'; $('#eStatus').replaceChildren(pill(l.status));
+  $('#eName').value = l.name || ''; $('#eEmail').value = l.email; $('#eTier').value = l.tier; $('#eNote').value = l.note || '';
+  $('#eStatusSel').value = l.revoked ? 'revoked' : l.paused_at ? 'paused' : 'active';
+  for (const id of ['eEmail', 'eStatusSel']) $('#' + id).disabled = !paid;
+  $('#eStatusWrap').classList.toggle('hidden', !paid); $('#eEmailNote').classList.toggle('hidden', !paid); $('#eDelLic').classList.toggle('hidden', !paid);
+  $('#eExpWrap').classList.toggle('hidden', !paid); $('#eUnitWrap').classList.add('hidden'); $('#eGiveNote').classList.add('hidden');
+  $('#eStartWrap').classList.toggle('hidden', !(paid && !activated)); $('#eStartNow').checked = false;
   $('#eExp').classList.toggle('hidden', !activated); $('#eDur').classList.toggle('hidden', activated);
-  $('#eExpLabel').textContent = activated ? 'Expires on' : 'Duration after the first sign-in (days)';
-  if (activated) $('#eExp').value = l.expires_at ? ymd(l.expires_at) : ''; else $('#eDur').value = l.duration_days || 30;
+  $('#eExpLabel').textContent = !paid ? 'License length' : activated ? 'Expires on' : 'Duration after the first sign-in (days)';
+  if (activated) $('#eExp').value = l.expires_at ? ymd(l.expires_at) : '';
+  else { $('#eDur').value = l.duration_days || 1; $('#eUnit').value = paid ? '1' : '365'; }
   const quick = (label, body, msg) => btn(label, () => act(async () => { await send('PATCH', '/licenses/' + l.id, body); await refresh(l.id); }, msg));
   $('#eQuick').replaceChildren(...(paid ? [quick('+30 days', { extend_days: 30 }, 'Extended by 30 days'), quick('+1 year', { extend_days: 365 }, 'Extended by 1 year'),
     l.status !== 'revoked' ? quick(l.paused_at ? 'Resume' : 'Pause', { paused: !l.paused_at }, l.paused_at ? 'Resumed: the paused time was added back' : 'Paused: Free tier for now, the clock is frozen') : null,
     quick(l.revoked ? 'Restore' : 'Revoke', { revoked: !l.revoked }, l.revoked ? 'Restored' : 'Revoked: blocked for good'),
     cfg.email ? btn('Email license', () => act(() => send('POST', `/licenses/${l.id}/email`), 'Email sent')) : null].filter(Boolean) : []));
+  syncGive();
 }
-function openEdit(id) {
+function openEdit(id, give) {
   const l = lics.find(x => x.id === id); if (!l) return;
-  fillEdit(l); $('#eConfirm').value = ''; $('#eDelPerson').disabled = true; $('#eErr').classList.add('hidden'); $('#editModal').classList.remove('hidden');
+  fillEdit(l);
+  if (give && !l.managed) { $('#eTier').value = 'PRO'; syncGive(); $('#eDur').focus(); }  // "Give license": Pro for 1 year to start with
+  $('#eConfirm').value = ''; $('#eDelPerson').disabled = true; $('#eErr').classList.add('hidden'); $('#editModal').classList.remove('hidden');
 }
+$('#eTier').addEventListener('change', syncGive);
 $('#eClose').addEventListener('click', () => $('#editModal').classList.add('hidden'));
 $('#eConfirm').addEventListener('input', () => ($('#eDelPerson').disabled = $('#eConfirm').value.trim().toLowerCase() !== editing.email.toLowerCase()));
 $('#eDelPerson').addEventListener('click', async () => { if (await purge(editing)) $('#editModal').classList.add('hidden'); });
@@ -105,12 +118,20 @@ $('#eDelLic').addEventListener('click', async () => {
 });
 $('#editForm').addEventListener('submit', async e => {
   e.preventDefault(); $('#eErr').classList.add('hidden');
-  const l = editing, paid = l.surname !== null, body = {}, put = (k, v, old) => { if (v !== (old ?? '')) body[k] = v; };
+  const l = editing, paid = l.managed, body = {}, put = (k, v, old) => { if (v !== (old ?? '')) body[k] = v; };
   put('name', $('#eName').value.trim(), l.name); put('note', $('#eNote').value.trim(), l.note);
   if (paid) {
-    put('surname', $('#eSurname').value.trim(), l.surname); put('email', $('#eEmail').value.trim().toLowerCase(), l.email); put('tier', $('#eTier').value, l.tier);
+    put('email', $('#eEmail').value.trim().toLowerCase(), l.email); put('tier', $('#eTier').value, l.tier);
+    const sel = $('#eStatusSel').value;  // Active / Paused / Revoked: each can be switched to any other
+    if ((sel === 'revoked') !== !!l.revoked) body.revoked = sel === 'revoked';
+    if ((sel === 'paused') !== !!l.paused_at) body.paused = sel === 'paused';
     if (l.activated_at) { if ($('#eExp').value && $('#eExp').value !== ymd(l.expires_at)) body.expires_on = $('#eExp').value; }
-    else if (+$('#eDur').value !== l.duration_days) body.duration_days = +$('#eDur').value;
+    else {
+      if (+$('#eDur').value !== l.duration_days) body.duration_days = +$('#eDur').value;
+      if ($('#eStartNow').checked) body.start_now = true;
+    }
+  } else if ($('#eTier').value !== 'FREE') {  // giving a license to a Free account: tier + length, it starts right away
+    body.tier = $('#eTier').value; body.duration_days = Math.max(1, Math.round(+$('#eDur').value * +$('#eUnit').value));
   }
   if (!Object.keys(body).length) return toast('Nothing changed');
   try { await send('PATCH', '/licenses/' + l.id, body); await refresh(l.id); toast('Saved'); }
@@ -155,7 +176,7 @@ $('#fClose').addEventListener('click', () => $('#licModal').classList.add('hidde
 $('#licForm').addEventListener('submit', async e => {
   e.preventDefault(); $('#fErr').classList.add('hidden'); $('#fOk').classList.add('hidden');
   try {
-    const r = await send('POST', '/licenses', { name: $('#fName').value, surname: $('#fSurname').value, email: $('#fEmail').value, tier: $('#fTier').value,
+    const r = await send('POST', '/licenses', { name: $('#fName').value, email: $('#fEmail').value, tier: $('#fTier').value,
       duration: $('#fDur').value + $('#fUnit').value, send_email: $('#fMail').checked });
     $('#fOk').textContent = `License created for ${$('#fEmail').value}. ` + (r.emailed === true ? 'Email sent. ' : r.emailed === false ? 'Email failed: ' + r.email_error + '. ' : '') + 'They just sign in with that Google account.';
     $('#fOk').classList.remove('hidden'); $('#licForm').reset(); licenses().then(overview);

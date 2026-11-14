@@ -11,8 +11,7 @@ EMAIL_RE = r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,}$"
 
 
 class NewLicense(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    surname: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=160)   # "Name & Surname"
     email: str = Field(pattern=EMAIL_RE, max_length=320)
     tier: str
     duration: str                    # 30d / 6m / 1y, counted from the customer's first sign-in
@@ -20,8 +19,7 @@ class NewLicense(BaseModel):
 
 
 class EditLicense(BaseModel):
-    name: str | None = Field(None, min_length=1, max_length=80)
-    surname: str | None = Field(None, min_length=1, max_length=80)
+    name: str | None = Field(None, min_length=1, max_length=160)   # "Name & Surname"
     email: str | None = Field(None, pattern=EMAIL_RE, max_length=320)
     note: str | None = Field(None, max_length=500)                 # admin-only memo, "" clears it
     tier: str | None = None
@@ -30,6 +28,7 @@ class EditLicense(BaseModel):
     expires_on: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")   # activated licenses
     duration_days: int | None = Field(None, ge=1, le=36500)        # licenses waiting for the first sign-in
     extend_days: int | None = Field(None, ge=1, le=3650)
+    start_now: bool | None = None                                  # start the clock now instead of at the first sign-in
 
 
 class EditShare(BaseModel):
@@ -37,7 +36,7 @@ class EditShare(BaseModel):
 
 
 def status(r) -> str:
-    if r["surname"] is None:
+    if r["duration_days"] is None:  # an automatic account without a license period
         return "free"
     if r["revoked"]:
         return "revoked"
@@ -71,9 +70,9 @@ def register(app, current_user, rate_limit, remove_share):
                 daily.setdefault(r["d"], {})[r["action"]] = r["n"]
             return {
                 "people": one("SELECT COUNT(DISTINCT email) FROM licenses"),
-                "paid_active": one("SELECT COUNT(*) FROM licenses WHERE surname IS NOT NULL AND revoked=0 AND activated_at IS NOT NULL AND expires_at>?", now),
-                "pending": one("SELECT COUNT(*) FROM licenses WHERE surname IS NOT NULL AND revoked=0 AND activated_at IS NULL"),
-                "expiring_30d": one("SELECT COUNT(*) FROM licenses WHERE surname IS NOT NULL AND revoked=0 AND expires_at BETWEEN ? AND ?", now, now + 30 * day),
+                "paid_active": one("SELECT COUNT(*) FROM licenses WHERE duration_days IS NOT NULL AND revoked=0 AND paused_at IS NULL AND activated_at IS NOT NULL AND expires_at>?", now),
+                "pending": one("SELECT COUNT(*) FROM licenses WHERE duration_days IS NOT NULL AND revoked=0 AND activated_at IS NULL"),
+                "expiring_30d": one("SELECT COUNT(*) FROM licenses WHERE duration_days IS NOT NULL AND revoked=0 AND expires_at BETWEEN ? AND ?", now, now + 30 * day),
                 "shares": one("SELECT COUNT(*) FROM shares"), "views": one("SELECT COALESCE(SUM(views),0) FROM shares"),
                 "drives": one("SELECT COUNT(*) FROM drive_tokens"),
                 "logins_24h": one("SELECT COUNT(*) FROM activity WHERE action='login' AND ts>?", now - day),
@@ -85,16 +84,16 @@ def register(app, current_user, rate_limit, remove_share):
     @app.get("/api/admin/licenses")
     def licenses(u=Depends(admin)):
         with db.connect() as c:
-            rows = c.execute("SELECT l.id,l.name,l.surname,l.email,l.tier,l.duration_days,l.activated_at,l.expires_at,l.revoked,l.paused_at,l.note,"
+            rows = c.execute("SELECT l.id,l.name,l.email,l.tier,l.duration_days,l.activated_at,l.expires_at,l.revoked,l.paused_at,l.note,"
                              "l.created_at,(SELECT COUNT(*) FROM drive_tokens d WHERE d.license_id=l.id) drive,"
                              "(SELECT COUNT(*) FROM shares s WHERE s.license_id=l.id) shares FROM licenses l ORDER BY l.id DESC").fetchall()
-        return [{**dict(r), "status": status(r)} for r in rows]
+        return [{**dict(r), "status": status(r), "managed": r["duration_days"] is not None} for r in rows]
 
     @app.post("/api/admin/licenses")
     def create_license(body: NewLicense, request: Request, u=Depends(admin)):
         rate_limit(request, "admin", 60)
         try:
-            key = db.create_license(body.name.strip(), body.surname.strip(), body.email, body.tier, body.duration)
+            key = db.create_license(body.name.strip(), body.email, body.tier, body.duration)
         except ValueError as e:
             raise HTTPException(400, str(e))
         out = {"reference_key": key, "emailed": None}
@@ -113,12 +112,18 @@ def register(app, current_user, rate_limit, remove_share):
             r = c.execute("SELECT * FROM licenses WHERE id=?", (lid,)).fetchone()
             if not r:
                 raise HTTPException(404, "License not found")
-            if r["surname"] is None and set(ch) - {"name", "note"}:
-                raise HTTPException(400, "Free accounts are automatic: only the name and the note can be edited")
+            if r["duration_days"] is None:  # an automatic Free account: edit it, or turn it into a license by choosing a tier and a length
+                if set(ch) - {"name", "note", "tier", "duration_days", "start_now"}:
+                    raise HTTPException(400, "A free account only has a name, a note and a tier")
+                if ch.get("tier", "FREE").upper() != "FREE":
+                    if "duration_days" not in ch:
+                        raise HTTPException(400, "Choose how long the license lasts")
+                    ch["start_now"] = True  # the person already has an account, so the license applies right away
+                else:
+                    ch.pop("duration_days", None); ch.pop("start_now", None)
             sets = {}  # column names below are fixed strings, values are bound parameters
-            for k in ("name", "surname"):
-                if k in ch:
-                    sets[k] = ch[k].strip()
+            if "name" in ch:
+                sets["name"] = ch["name"].strip()
             if "email" in ch:
                 sets["email"] = ch["email"].strip().lower()
             if "note" in ch:
@@ -141,6 +146,11 @@ def register(app, current_user, rate_limit, remove_share):
                 if r["activated_at"]:
                     raise HTTPException(400, "Already activated: change the expiry date instead")
                 sets["duration_days"] = ch["duration_days"]
+            if ch.get("start_now"):
+                if r["activated_at"]:
+                    raise HTTPException(400, "The license has already started")
+                sets["activated_at"] = now
+                sets["expires_at"] = now + sets.get("duration_days", r["duration_days"]) * 86400
             if "extend_days" in ch:
                 if r["activated_at"]:
                     sets["expires_at"] = sets.get("expires_at", r["expires_at"]) + ch["extend_days"] * 86400
@@ -167,7 +177,7 @@ def register(app, current_user, rate_limit, remove_share):
         if r["email"] == db.ADMIN_EMAIL:
             raise HTTPException(400, "The admin account cannot be deleted")
         if not purge:  # only the paid license goes; the person keeps their account and links (back to Free)
-            if r["surname"] is None:
+            if r["duration_days"] is None:
                 raise HTTPException(400, "A free account holds the person's data: use Delete person")
             db.delete_license(lid)
         else:  # everything about this email: links (and their Drive files), Drive login, sessions, log, licenses
@@ -188,7 +198,7 @@ def register(app, current_user, rate_limit, remove_share):
     @app.post("/api/admin/licenses/{lid}/email")
     def resend(lid: int, u=Depends(admin)):
         with db.connect() as c:
-            r = c.execute("SELECT * FROM licenses WHERE id=? AND surname IS NOT NULL", (lid,)).fetchone()
+            r = c.execute("SELECT * FROM licenses WHERE id=? AND duration_days IS NOT NULL", (lid,)).fetchone()
         if not r:
             raise HTTPException(404)
         try:

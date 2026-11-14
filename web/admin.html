@@ -64,7 +64,7 @@
         <span class="flex-1"></span>
         <button class="btn btn-p" id="newLic">+ New license</button>
       </div>
-      <div class="card scroll"><table><thead><tr><th>Person</th><th>Email</th><th>Tier</th><th>Status</th><th>Expires</th><th>Drive</th><th>Links</th><th>Actions</th></tr></thead><tbody id="lrows"></tbody></table></div>
+      <div class="card scroll"><table><thead><tr><th>Name &amp; Surname</th><th>Email</th><th>Tier</th><th>Status</th><th>Expires</th><th>Drive</th><th>Links</th><th>Actions</th></tr></thead><tbody id="lrows"></tbody></table></div>
       <p class="text-xs text-slate-400 mt-2">Free accounts appear automatically when someone signs in: you can edit their name and note, or delete the person. A license applies when its email signs in with Google; the duration starts at that first sign-in. Pause = Free tier for now and the clock is frozen; Revoke = blocked for good.</p>
     </section>
 
@@ -82,10 +82,7 @@
 <div id="licModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
   <form id="licForm" class="glass modal-card rounded-2xl p-6 w-full max-w-md flex flex-col gap-3">
     <h2 class="text-lg font-bold">New license</h2>
-    <div class="grid grid-cols-2 gap-2">
-      <label class="text-xs">Name<input class="inp" id="fName" required maxlength="80"></label>
-      <label class="text-xs">Surname<input class="inp" id="fSurname" required maxlength="80"></label>
-    </div>
+    <label class="text-xs">Name &amp; Surname<input class="inp" id="fName" required maxlength="160" autocomplete="off"></label>
     <label class="text-xs">Google email of the customer<input class="inp" id="fEmail" type="email" required maxlength="200"></label>
     <div class="grid grid-cols-3 gap-2">
       <label class="text-xs col-span-1">Tier<select class="inp" id="fTier"><option>PRO</option><option>ENTERPRISE</option><option>FREE</option></select></label>
@@ -102,16 +99,19 @@
 <div id="editModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
   <form id="editForm" class="glass modal-card rounded-2xl p-6 w-full max-w-lg flex flex-col gap-3">
     <div class="flex items-center justify-between"><h2 class="text-lg font-bold" id="eTitle">Edit license</h2><span id="eStatus"></span></div>
-    <div class="grid grid-cols-2 gap-2">
-      <label class="text-xs">Name<input class="inp" id="eName" required maxlength="80"></label>
-      <label class="text-xs">Surname<input class="inp" id="eSurname" maxlength="80"></label>
-    </div>
+    <label class="text-xs">Name &amp; Surname<input class="inp" id="eName" required maxlength="160" autocomplete="off"></label>
     <label class="text-xs">Google email<input class="inp" id="eEmail" type="email" required maxlength="200"></label>
     <p class="text-xs text-amber-400" id="eEmailNote">Changing the email moves this license to another Google account: the old account falls back to Free.</p>
     <div class="grid grid-cols-2 gap-2">
-      <label class="text-xs">Tier<select class="inp" id="eTier"><option>FREE</option><option>PRO</option><option>ENTERPRISE</option></select></label>
-      <label class="text-xs" id="eExpWrap"><span id="eExpLabel">Expires on</span><input class="inp" id="eExp" type="date"><input class="inp hidden" id="eDur" type="number" min="1" max="36500"></label>
+      <label class="text-xs">Tier<select class="inp" id="eTier"><option value="FREE">Free</option><option value="PRO">Pro</option><option value="ENTERPRISE">Enterprise</option></select></label>
+      <label class="text-xs" id="eStatusWrap">Status<select class="inp" id="eStatusSel"><option value="active">Active</option><option value="paused">Paused (Free tier, clock frozen)</option><option value="revoked">Revoked (blocked)</option></select></label>
     </div>
+    <div class="grid grid-cols-2 gap-2" id="eExpWrap">
+      <label class="text-xs"><span id="eExpLabel">Expires on</span><input class="inp" id="eExp" type="date"><input class="inp hidden" id="eDur" type="number" min="1" max="36500"></label>
+      <label class="text-xs hidden" id="eUnitWrap">Unit<select class="inp" id="eUnit"><option value="1">days</option><option value="30">months</option><option value="365" selected>years</option></select></label>
+    </div>
+    <p class="text-xs text-sky-300 hidden" id="eGiveNote">The license applies to this person right away.</p>
+    <label class="text-sm hidden" id="eStartWrap"><input type="checkbox" id="eStartNow"> Start the license clock now (instead of at the first sign-in)</label>
     <label class="text-xs">Admin note (only you see it)<textarea class="inp" id="eNote" rows="2" maxlength="500"></textarea></label>
     <div id="eQuick" class="flex flex-wrap gap-2"></div>
     <details>
