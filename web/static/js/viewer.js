@@ -25,6 +25,7 @@ function askPassword(wrong) {
   if (!m.ok) return fail(m.status === 502 ? 'This model is temporarily unavailable.' : 'Could not load the model.');
   await stage.loadSaved(await m.arrayBuffer());
   stage.applyConfig(cfg);
+  stage.fitIfClipped();
   if (cfg.env?.preset === 'custom') {
     get('hdr').then(h => h.ok ? h.blob() : Promise.reject()).then(b => stage.setHdr(URL.createObjectURL(b), cfg.env.intensity)).catch(() => stage.setEnv('softbox', cfg.env.intensity));
   }
@@ -64,7 +65,10 @@ function askPassword(wrong) {
 })().catch(e => fail('Could not load this project (' + e.message + ').'));
 
 stage.addEventListener('toast', e => toast(e.detail));
-$('#panelBtn').onclick = () => $('#panel').classList.toggle('closed');
+// the parts panel starts closed (it is in the HTML) so the model is not covered, especially on a phone
+const setPanel = open => { $('#panel').classList.toggle('closed', !open); $('#panelBtn').classList.toggle('on', open); };
+$('#panelBtn').onclick = () => setPanel($('#panel').classList.contains('closed'));
+$('#panelClose').onclick = () => setPanel(false);
 $('#rotate').onclick = e => { stage.controls.autoRotate = !stage.controls.autoRotate; stage.controls.autoRotateSpeed = 2; e.currentTarget.classList.toggle('on', stage.controls.autoRotate); };
 if (!document.fullscreenEnabled) $('#full').classList.add('hidden');
 $('#full').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());

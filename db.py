@@ -33,6 +33,9 @@ def connect():
 
 def init():
     SHARES.mkdir(parents=True, exist_ok=True)
+    for p in SHARES.glob("*"):  # leftovers of an upload that was cut off (crash, power loss): models are never kept on this server
+        if p.is_file() and p.stat().st_mtime < time.time() - 3600:
+            p.unlink(missing_ok=True)
     with connect() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS licenses(

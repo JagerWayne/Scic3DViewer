@@ -27,6 +27,7 @@ details.sec>div{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
 .ib:hover{background:rgba(255,255,255,.15)}
 .hidden{display:none!important}
 #toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:60;padding:8px 14px;border-radius:10px;background:#1e293b;border:1px solid #475569}
+#panel.closed{display:none} /* the side panel can be closed on every screen size */
 @media (max-width:768px){#panel{top:auto!important;height:45vh;width:100%!important;border-radius:16px 16px 0 0}#panel.closed{height:0;overflow:hidden}}
 .modal-card{max-height:92vh;overflow-y:auto}
 @media (max-width:768px){

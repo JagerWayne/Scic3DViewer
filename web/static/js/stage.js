@@ -187,7 +187,7 @@ export class Stage extends EventTarget {
   frame() {
     const box = new THREE.Box3().setFromObject(this.assembly).union(new THREE.Box3().setFromObject(this.base));
     if (box.isEmpty()) return;
-    const c = box.getCenter(new V3()), d = box.getSize(new V3()).length() / 2 / Math.sin(this.camera.fov * Math.PI / 360) * 1.1;
+    const c = box.getCenter(new V3()), d = box.getSize(new V3()).length() / 2 / Math.sin(this._halfFov()) * 1.1;
     this.camera.position.copy(c).add(new V3(1, .7, 1).normalize().multiplyScalar(d));
     this.controls.target.copy(c); this.camera.near = d / 100; this.camera.far = d * 100; this.camera.updateProjectionMatrix();
     this.grid.position.y = box.min.y; this.controls.update();
@@ -202,6 +202,12 @@ export class Stage extends EventTarget {
   }
   setLightPreset(name) { this.preset = name; this._placeLights(); }
   setShadows(on) { this.lights[1].castShadow = on; this.floor.visible = on; this.eachMat(m => (m.needsUpdate = true)); }
+  _halfFov() { const v = this.camera.fov * Math.PI / 360; return Math.min(v, Math.atan(Math.tan(v) * this.camera.aspect)); } // the narrower of vertical/horizontal: portrait phones are limited by width
+  fitIfClipped() { // keep the camera angle but step back when the model does not fit this screen (e.g. a desktop camera opened on a phone)
+    const box = new THREE.Box3().setFromObject(this.assembly).union(new THREE.Box3().setFromObject(this.base)); if (box.isEmpty()) return;
+    const need = box.getSize(new V3()).length() / 2 / Math.sin(this._halfFov()) * 1.05, dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.length() < need) { this.camera.position.copy(this.controls.target).add(dir.setLength(need)); this.camera.far = Math.max(this.camera.far, need * 20); this.camera.updateProjectionMatrix(); this.controls.update(); }
+  }
   meshes() { const a = []; this.assembly.traverseVisible(o => o.isMesh && a.push(o)); return a; }
   meshesAll() { const a = []; this.assembly.traverse(o => o.isMesh && a.push(o)); return a; }
   size() { const b = new THREE.Box3().setFromObject(this.assembly); return b.isEmpty() ? 2 : Math.max(...b.getSize(new V3()).toArray()); }

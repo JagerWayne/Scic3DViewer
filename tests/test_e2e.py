@@ -126,6 +126,35 @@ def test_admin_edits_pauses_and_deletes_a_license(server):
         browser.close()
 
 
+def test_viewer_parts_panel_starts_closed_and_can_be_opened(server):
+    token = db.login_google("Viewer Owner", "vo@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        studio = browser.new_context(bypass_csp=True).new_page()
+        studio.add_init_script(f"localStorage.setItem('scic_token','{token}')")
+        studio.goto(BASE + "/studio")
+        studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
+        studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
+        studio.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+        studio.click("#share"); studio.click("#sGo")
+        studio.wait_for_selector("#sResult:not(.hidden)", timeout=30000)
+        url = studio.input_value("#sUrl")
+        for name, ctx in (("desktop", dict(viewport={"width": 1280, "height": 800})),
+                          ("phone", dict(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True))):
+            page = browser.new_context(bypass_csp=True, **ctx).new_page()
+            page.goto(url)
+            page.wait_for_function("window.stage && window.stage.triCount() === 12", timeout=30000)
+            shown = lambda: page.evaluate("getComputedStyle(document.querySelector('#panel')).display")
+            fits = page.evaluate("""() => { const s = window.stage, V = s.camera.position.constructor;
+                return [[-1, 0, -1], [1, 0, -1], [-1, 2, 1], [1, 2, 1], [-1, 0, 1], [1, 2, -1]].every(p => { const n = new V(...p).project(s.camera); return Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1; }); }""")
+            assert fits, name                                                  # the whole 2x2x2 cube is on screen, also on a narrow phone
+            assert shown() == "none", name                                     # nothing covers the model at first
+            page.click("#panelBtn"); assert shown() != "none", name            # the Parts button opens it
+            page.click("#panelClose"); assert shown() == "none", name          # the X closes it again
+            page.click("#panelBtn"); page.click("#panelBtn"); assert shown() == "none", name   # and the button toggles
+        browser.close()
+
+
 def test_admin_gives_a_license_from_the_edit_page(server):
     adm = db.login_google("Boss", db.ADMIN_EMAIL, "test")[0]
     person = db.login_google("Gina Gift", "gina@x.com", "test")[0]                 # signed in once: a Free account

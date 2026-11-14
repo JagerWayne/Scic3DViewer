@@ -29,7 +29,8 @@
   <button class="btn" data-mode="thickness">Thick</button>
 </nav>
 
-<aside id="panel" class="fixed right-0 top-12 bottom-0 w-72 glass z-20 overflow-y-auto">
+<aside id="panel" class="closed fixed right-0 top-12 bottom-0 w-72 glass z-20 overflow-y-auto">
+  <div class="flex items-center justify-between px-3 pt-3"><b class="text-sm">Parts &amp; tools</b><button class="btn" id="panelClose" aria-label="Close panel">✕</button></div>
   <details class="sec" open><summary>Parts</summary><div><div id="outliner" class="max-h-64 overflow-y-auto"></div></div></details>
   <details class="sec hidden" id="secExplode" open><summary>Exploded view</summary><div>
     <div class="row"><label for="explode">Explode</label><input type="range" id="explode" min="0" max="100" step="1" value="0"></div>

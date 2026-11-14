@@ -156,6 +156,16 @@ def test_legal_pages_are_public_and_filled_in():
     assert "drive.file" in c.get("/privacy").text and "Google API Services User Data Policy" in c.get("/privacy").text
 
 
+def test_old_upload_leftovers_are_removed_at_start():
+    old, fresh = db.SHARES / "leftover-old.glb.gz", db.SHARES / "leftover-new.glb"
+    old.write_bytes(b"x"); fresh.write_bytes(b"x")
+    two_hours_ago = time.time() - 7200
+    os.utime(old, (two_hours_ago, two_hours_ago))
+    db.init()
+    assert not old.exists() and fresh.exists()                 # only stale files go: an upload in progress is left alone
+    fresh.unlink()
+
+
 def test_drive_help_is_public():
     r = c.get("/help/drive")  # no login needed
     assert r.status_code == 200 and "Connect Google Drive" in r.text
