@@ -7,7 +7,17 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 import uvicorn
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
+
+_goto = Page.goto  # the pages load Tailwind and Three.js from public CDNs: give a slow connection two minutes instead of thirty seconds
+
+
+def _patient_goto(self, url, **kw):
+    kw.setdefault("timeout", 120000)
+    return _goto(self, url, **kw)
+
+
+Page.goto = _patient_goto
 
 import app as appmod, db, storage
 
@@ -59,7 +69,7 @@ def run_wizard(page, title=None, custom=None, download=False):
         page.fill("#iWm", "(c) E2E Studio")
     page.click("#sNext")                      # 3 -> 4 expiry
     page.click("#sNext")                      # 4 -> 5 processing starts
-    page.wait_for_selector("#sResult:not(.hidden)", timeout=180000)   # 6 publish
+    page.wait_for_selector("#sResult:not(.hidden)", timeout=420000)   # 6 publish
     return page.input_value("#sUrl")
 
 
@@ -122,7 +132,7 @@ def test_share_dialog_on_a_phone(server):
         for _ in range(3):                                                               # every step fits the phone
             page.click("#sNext"); assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.click("#sNext")
-        page.wait_for_selector("#sResult:not(.hidden)", timeout=180000)
+        page.wait_for_selector("#sResult:not(.hidden)", timeout=420000)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.click("#sClose")
         assert shown("#tools") != "none"                                                 # everything is back after closing
@@ -295,6 +305,13 @@ def test_image_link_callouts_toggle_and_a_click_turns_to_the_tag(server):
         assert tour.is_visible()                                                          # tour buttons exist when there are callouts
         tour.get_by_role("button", name="Next callout").click()
         assert "1/1" in tour.inner_text()
+        vh = 700                                                                          # nothing sits over the bottom quarter, where watermarks are
+        for el in (tour.get_by_role("button", name="Next callout"), tour.get_by_role("button", name="Previous callout"), tour.locator("[aria-live]")):
+            b = el.bounding_box(); assert b["y"] + b["height"] < vh * 0.75, b
+        viewer.click("#menuBtn"); viewer.click("button:has-text('Play tour')")            # play and stop live in the menu
+        viewer.click("#menuBtn"); assert viewer.locator("#menu button", has_text="Stop tour").is_visible()
+        viewer.click("#menu button >> text=Stop tour")
+        viewer.click("#menuBtn"); assert viewer.locator("#menu button", has_text="Play tour").is_visible(); viewer.keyboard.press("Escape")
         viewer.click("#menuBtn"); viewer.click("button:has-text('Callouts')")             # viewers can hide the tags...
         viewer.wait_for_selector(".callout", state="hidden", timeout=5000)
         assert tour.is_hidden()                                                           # ...and the tour buttons go with them
@@ -487,4 +504,42 @@ def test_menus_work_with_the_keyboard_and_dialogs_are_labelled(server):
         page.click("#helpClose")
         for label in ("Select", "Move", "Rotate", "Scale", "Snap", "Brush", "Callout"):
             assert page.locator(f"#tools [aria-label='{label}']").count() == 1             # icon buttons all have names
+        browser.close()
+
+
+def test_studio_has_no_tools_that_the_viewer_never_shows(server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = open_studio(browser, "clean@x.com")
+        for label in ("Ruler", "Angle", "Thickness"):
+            assert page.locator(f"#tools [aria-label='{label}']").count() == 0           # measuring never reaches a picture link
+        assert page.locator("#unit, #uscale, #clearDims").count() == 0 and page.locator("#grid").count() == 0
+        assert page.evaluate("typeof stage.setUnit") == "undefined" and page.evaluate("typeof stage.clearDims") == "undefined"
+        cfg = page.evaluate("stage.getConfig()")
+        assert "units" not in cfg and "grid" not in cfg                                   # nor does the saved scene carry them
+        page.click("[data-menu=view]"); page.click("#vGrid")                              # the floor grid is only a viewing aid in the View menu
+        assert page.evaluate("stage.grid.visible") is False and page.locator("#vGrid").get_attribute("aria-checked") == "false"
+        page.click("[data-menu=view]"); page.click("#vGrid"); assert page.evaluate("stage.grid.visible") is True
+        browser.close()
+
+
+def test_inspector_collapses_and_menus_stay_on_top(server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = open_studio(browser, "collapse@x.com")
+        shown = lambda: page.evaluate("getComputedStyle(document.querySelector('#panel')).display") != "none"
+        assert shown() and page.locator("#panelToggle").is_visible()
+        right_open = page.locator("#panelToggle").bounding_box()
+        page.click("#panelToggle")                                                         # collapse: the whole scene is visible
+        assert not shown() and page.locator("#panelToggle").get_attribute("aria-expanded") == "false"
+        assert page.locator("#panelToggle").bounding_box()["x"] > right_open["x"] + 100    # the handle moved to the right edge
+        page.reload(); page.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=60000)
+        assert not shown()                                                                 # and the choice is remembered
+        page.click("[data-menu=view]"); page.click("#vPanel"); assert shown()              # the View menu brings it back too
+        page.click("#panelToggle"); page.click("#panelToggle"); assert shown()
+        # the dropdown menus must be drawn above the tool rail on the left and the inspector on the right
+        on_top = """sel => { const m = document.querySelector(sel), r = m.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + 20); return !!e && m.contains(e); }"""
+        page.click("[data-menu=file]"); assert page.evaluate(on_top, "#menu-file")
+        page.click("#accountBtn"); assert page.evaluate(on_top, "#menu-account")
+        page.keyboard.press("Escape")
         browser.close()

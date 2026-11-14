@@ -21,11 +21,9 @@ TIERS = {
     "ENTERPRISE": dict(max_mb=500, max_shares_month=5000, max_projects=1000, max_annotations=None, share_permissions=True,
                        formats=["glb", "obj", "stl", "usdz"],
                        tools=["paint_basic", "paint_fill", "paint_undo", "assembly", "tour",
-                              "slicer", "explode", "measure", "decimate", "base", "hdri", "capture", "cad_import"],
+                              "slicer", "explode", "decimate", "base", "hdri", "capture", "cad_import"],
                        images=dict(presets=["light", "standard", "high"], custom=True, watermark="custom", max_az=180, max_el=12, max_px=2048, max_mb=250)),
 }
-# Which share flag needs which tool (recipient permissions can't exceed the creator's tier).
-SHARE_FLAG_TOOL = {"allow_measure": "measure", "allow_explode": "explode"}
 
 
 def connect():

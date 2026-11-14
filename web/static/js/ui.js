@@ -59,8 +59,10 @@ export function mountMenus() {
     b.setAttribute('aria-expanded', 'true'); if (focusFirst) items(p)[0]?.focus();
   };
   btns.forEach(b => {
-    b.addEventListener('click', () => (b.getAttribute('aria-expanded') === 'true' ? close() : open(b)));
-    b.addEventListener('mouseenter', () => { if (isOpen() && b.getAttribute('aria-expanded') !== 'true') open(b); });
+    b.addEventListener('click', () => { // a click right after hovering over to this menu must not close it again
+      if (b.getAttribute('aria-expanded') !== 'true') open(b); else if (performance.now() - (b._hoverAt || 0) > 600) close();
+    });
+    b.addEventListener('mouseenter', () => { if (isOpen() && b.getAttribute('aria-expanded') !== 'true') { b._hoverAt = performance.now(); open(b); } });
     b.addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(b, true); } });
     panel(b).addEventListener('click', e => { if (e.target.closest('.mitem')) close(); }); // choosing an item closes the menu
     panel(b).addEventListener('keydown', e => {

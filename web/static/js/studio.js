@@ -3,7 +3,7 @@ import { Stage, BACKDROPS } from '/static/js/stage.js';
 import { $, toast, download, mountOutliner, mountTour, mountMenus } from '/static/js/ui.js';
 
 const MB = 1024 * 1024;
-const TIER_FOR = { paint_fill: 'PRO', paint_undo: 'ENTERPRISE', assembly: 'PRO', tour: 'PRO', slicer: 'PRO', explode: 'PRO', measure: 'ENTERPRISE', decimate: 'PRO', base: 'PRO', hdri: 'PRO', capture: 'PRO', cad_import: 'ENTERPRISE' };
+const TIER_FOR = { paint_fill: 'PRO', paint_undo: 'ENTERPRISE', assembly: 'PRO', tour: 'PRO', slicer: 'PRO', explode: 'PRO', decimate: 'PRO', base: 'PRO', hdri: 'PRO', capture: 'PRO', cad_import: 'ENTERPRISE' };
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* private mode */ } } };
 
 const stage = window.stage = new Stage($('#stage'));
@@ -61,7 +61,7 @@ on('signout', 'click', () => { token = null; store.set('scic_token'); location.r
 async function loadFiles(files, replace) {
   if (replace) {
     if (dirty && !confirm('Discard your unsaved changes?')) return;
-    editing = null; current = null; stage.assembly.clear(); stage.annotations = []; stage.buildAnnos(); stage.select(null); stage.setBase(null); stage.clearDims();
+    editing = null; current = null; stage.assembly.clear(); stage.annotations = []; stage.buildAnnos(); stage.select(null); stage.setBase(null);
     stage.history = []; stage.redoStack = []; stage.emit('history'); setDirty(false);
   }
   for (const f of files) {
@@ -80,7 +80,7 @@ addEventListener('drop', e => { e.preventDefault(); if (me && e.dataTransfer.fil
 // ---------- toolbar ----------
 document.querySelectorAll('#tools [data-mode]').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.need && !need(b.dataset.need)) return;
-  const m = b.dataset.mode, mode = ['brush', 'fill'].includes(m) ? 'paint' : ['ruler', 'angle', 'thickness'].includes(m) ? 'measure' : m;
+  const m = b.dataset.mode, mode = ['brush', 'fill'].includes(m) ? 'paint' : m;
   stage.setMode(mode, m); setActive(b);
 }));
 document.querySelectorAll('#tools [data-gizmo]').forEach(b => b.addEventListener('click', () => {
@@ -104,12 +104,19 @@ addEventListener('keydown', e => {
 });
 stage.addEventListener('locked', e => toast(e.detail === 'paint_undo' ? 'Undoing paint strokes needs the ENTERPRISE tier' : `${me.tier} tier allows ${me.max_annotations} callouts. Upgrade for unlimited.`));
 stage.addEventListener('toast', e => toast(e.detail));
-on('panelBtn', 'click', () => $('#panel').classList.toggle('closed'));
+// the inspector can be collapsed (handle on its edge, View menu, or the Panel button on phones); desktops remember the choice
+const panelOpen = () => !$('#panel').classList.contains('closed');
+function setPanel(open) {
+  $('#panel').classList.toggle('closed', !open); document.body.classList.toggle('panel-closed', !open);
+  const t = $('#panelToggle'); t.setAttribute('aria-expanded', open); t.setAttribute('aria-label', open ? 'Collapse inspector' : 'Expand inspector');
+  $('#vPanel').setAttribute('aria-checked', open);
+  if (!matchMedia('(max-width: 768px)').matches) store.set('scic_panel', open ? '1' : '0');
+}
+on('panelBtn', 'click', () => setPanel(!panelOpen())); on('panelToggle', 'click', () => setPanel(!panelOpen()));
 
 // ---------- panel controls ----------
 const bd = $('#backdrop'); Object.keys(BACKDROPS).forEach(k => bd.add(new Option(k[0].toUpperCase() + k.slice(1), k)));
 on('backdrop', 'change', () => stage.setBackdrop(val('backdrop')));
-on('grid', 'change', e => { stage.grid.visible = e.target.checked; $('#vGrid').setAttribute('aria-checked', e.target.checked); });
 on('light', 'input', () => stage.setLight(+val('light')));
 const mat = () => stage.setMaterial(+val('rough'), +val('metal'));
 on('rough', 'input', mat); on('metal', 'input', mat);
@@ -141,9 +148,6 @@ function updateExplode() {
   $('#explodeNote').textContent = ok || !can('explode') ? '' : 'Needs two or more parts (disabled for a single or merged mesh).';
   if (!ok) $('#explode').value = 0;
 }
-on('unit', 'change', () => stage.setUnit(val('unit'), +val('uscale') || 1));
-on('uscale', 'input', () => stage.setUnit(val('unit'), +val('uscale') || 1));
-on('clearDims', 'click', () => stage.clearDims());
 on('zup', 'click', () => { if (!stage.meshesAll().length) return toast('Load a model first'); stage.zUpToYUp(); markDirty(); toast('Model turned upright'); });
 on('merge', 'click', () => { if (need('assembly')) { stage.mergeAll(); markDirty(); toast('Merged into one mesh (textures are baked to vertex colors)'); } });
 
@@ -166,7 +170,7 @@ on('webm', 'click', async () => {
 
 // ---------- menus, tabs, snapping, undo/redo, view presets ----------
 mountMenus();
-const openPanel = () => { $('#panel').classList.remove('closed'); $('#vPanel').setAttribute('aria-checked', true); };
+const openPanel = () => setPanel(true);
 function showTab(name) {
   document.querySelectorAll('#panel [data-tab]').forEach(t => { const on = t.dataset.tab === name; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
   document.querySelectorAll('#panel [data-pane]').forEach(pn => pn.classList.toggle('hidden', pn.dataset.pane !== name));
@@ -187,9 +191,9 @@ on('mDelete', 'click', () => {
 });
 function look(dir) { const t = stage.controls.target, d = stage.camera.position.distanceTo(t) || 3; stage.camera.position.copy(t).addScaledVector(new THREE.Vector3(...dir).normalize(), d); stage.controls.update(); }
 on('vFrame', 'click', () => stage.frame()); on('vFront', 'click', () => look([0, .15, 1])); on('vSide', 'click', () => look([1, .15, 0])); on('vTop', 'click', () => look([0, 1, .001]));
-on('vGrid', 'click', () => { const g = $('#grid'); g.checked = !g.checked; g.dispatchEvent(new Event('change')); });
+on('vGrid', 'click', () => { stage.grid.visible = !stage.grid.visible; $('#vGrid').setAttribute('aria-checked', stage.grid.visible); }); // a viewing aid: it is never drawn into the pictures
 on('vCallouts', 'click', () => { const on = $('#vCallouts').getAttribute('aria-checked') !== 'true'; stage.showAnnos(on); $('#vCallouts').setAttribute('aria-checked', on); });
-on('vPanel', 'click', () => { const closed = $('#panel').classList.toggle('closed'); $('#vPanel').setAttribute('aria-checked', !closed); });
+on('vPanel', 'click', () => setPanel(!panelOpen()));
 on('vFull', 'click', () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()));
 on('vHelp', 'click', () => show('helpModal')); on('helpClose', 'click', () => show('helpModal', false));
 
@@ -264,7 +268,7 @@ async function openProject(id) {
   try {
     const [meta, buf] = await Promise.all([call(`/api/drive-projects/${id}`),
       fetch(`/api/drive-projects/${id}/model`, { headers: { Authorization: 'Bearer ' + token } }).then(r => { if (!r.ok) throw new Error('Could not load the model from your Google Drive'); return r.arrayBuffer(); })]);
-    editing = null; stage.assembly.clear(); stage.base.clear(); stage.select(null); stage.clearDims(); stage.annotations = []; stage.buildAnnos();
+    editing = null; stage.assembly.clear(); stage.base.clear(); stage.select(null); stage.annotations = []; stage.buildAnnos();
     await stage.loadSaved(buf); stage.applyConfig(meta.config); syncSliders();
     stage.history = []; stage.redoStack = []; stage.emit('history');
     current = { id: meta.id, name: meta.name }; modelName = meta.name; setDirty(false); show('openModal', false); toast('Project opened');
@@ -506,7 +510,7 @@ async function editProject(id) {
   try {
     const [meta, buf] = await Promise.all([call(`/api/projects/${id}/edit`),
       fetch(`/api/projects/${id}/edit-model`, { headers: { Authorization: 'Bearer ' + token } }).then(r => { if (!r.ok) throw new Error('Could not load the model from your Google Drive'); return r.arrayBuffer(); })]);
-    stage.assembly.clear(); stage.base.clear(); stage.select(null); stage.clearDims();
+    stage.assembly.clear(); stage.base.clear(); stage.select(null);
     await stage.loadSaved(buf); stage.applyConfig(meta.config); syncSliders();
     editing = { id, title: meta.title }; current = null; stage.history = []; stage.redoStack = []; stage.emit('history'); setDirty(false); show('projectsModal', false);
     toast('Opened for editing. Share link, then Publish, updates the same link.');
@@ -579,6 +583,7 @@ addEventListener('keydown', e => {
 });
 new MutationObserver(() => document.body.classList.toggle('modal-open', modals.some(m => !m.classList.contains('hidden'))))
   .observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
-if (matchMedia('(max-width: 768px)').matches) $('#panel').classList.add('closed'); // start with the canvas, not the settings sheet
+if (matchMedia('(max-width: 768px)').matches) setPanel(false); // start with the canvas, not the settings sheet
+else if (store.get('scic_panel') === '0') setPanel(false);
 
 boot();

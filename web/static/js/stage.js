@@ -93,13 +93,13 @@ export class Stage extends EventTarget {
 
     this.state = { rough: .5, metal: 0, touched: false, env: 'softbox', envI: 1, clipOn: false, clipC: 0, explode: 0, light: 1, backdrop: 'midnight' };
     this.clipPlane = new THREE.Plane(new V3(0, 0, -1), 0);
-    this.mode = 'select'; this.tool = 'brush'; this.mtype = 'ruler';
+    this.mode = 'select'; this.tool = 'brush';
     this.brushR = .12; this.paintColor = new THREE.Color('#ef4444'); this.fillAngle = 30;
     this.history = []; this.redoStack = []; this.snap = { on: false, deg: 15 }; this.canPaintUndo = true; this.selectable = true; this.gizmo = false; this.maxAnnotations = null;
     this.ask = m => window.prompt(m, '');
     this.ray = new THREE.Raycaster(); this._ndc = new THREE.Vector2();
-    this.labels = []; this.annotations = []; this.annoLabels = []; this.dims = [];
-    this.unit = 'units'; this.unitScale = 1; this.pinned = null; this.fly = null; this.mpts = [];
+    this.labels = []; this.annotations = []; this.annoLabels = [];
+    this.pinned = null; this.fly = null;
     this.ring = new THREE.Mesh(new THREE.RingGeometry(.93, 1, 48), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: .9 }));
     this.ring.visible = false; this.ring.renderOrder = 20; this.overlay.add(this.ring);
     this.hl = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: .55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
@@ -449,8 +449,8 @@ export class Stage extends EventTarget {
 
   // ---------- modes & pointer ----------
   setMode(mode, tool) {
-    this.mode = mode; if (tool) { if (mode === 'paint') this.tool = tool; if (mode === 'measure') this.mtype = tool; }
-    this.ring.visible = this.hl.visible = false; this.mpts = [];
+    this.mode = mode; if (tool && mode === 'paint') this.tool = tool;
+    this.ring.visible = this.hl.visible = false;
     if (mode === 'paint') this._prepAll();
     this.container.style.cursor = mode === 'select' ? '' : 'crosshair'; this.emit('mode', mode);
   }
@@ -487,7 +487,6 @@ export class Stage extends EventTarget {
       if (this.selectable) this.select(h ? this.topPart(h.object) : null);
     } else if (this.mode === 'paint') { if (h && this.tool === 'fill') this._fill(h); }
     else if (this.mode === 'annotate') { if (h) this._annotateAt(h); else this.unpin(); }
-    else if (this.mode === 'measure' && h) this._measureAt(h);
   }
 
   // ---------- 2D labels projected from 3D ----------
@@ -502,36 +501,6 @@ export class Stage extends EventTarget {
       l.el.style.display = vis ? '' : 'none';
       if (vis) l.el.style.transform = `translate(-50%,-50%) translate(${(v.x * .5 + .5) * this.w}px,${(-v.y * .5 + .5) * this.h}px)`;
     }
-  }
-
-  // ---------- measurement ----------
-  setUnit(unit, scale) { this.unit = unit; this.unitScale = scale; this.dims.forEach(d => (d.l.el.textContent = this._dimText(d))); }
-  _dimText(d) {
-    if (d.type === 'angle') return `∠ ${d.v.toFixed(1)}°`;
-    return `${d.type === 'thickness' ? 'T ' : ''}${(d.v * this.unitScale).toFixed(2)} ${this.unit}`;
-  }
-  _dimAdd(type, v, a, b) {
-    const s = this.size(), g = new THREE.Group(), mk = p => { const m = new THREE.Mesh(new THREE.SphereGeometry(s * .008, 12, 8), new THREE.MeshBasicMaterial({ color: 0x22d3ee, depthTest: false })); m.position.copy(p); m.renderOrder = 10; return m; };
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineBasicMaterial({ color: 0x22d3ee, depthTest: false })); line.renderOrder = 10;
-    g.add(mk(a), mk(b), line); this.overlay.add(g);
-    const d = { type, v, g }; d.l = this._label('', a.clone().lerp(b, .5), 'lbl badge'); d.l.el.textContent = this._dimText(d);
-    this.dims.push(d); this.emit('dims');
-  }
-  clearDims() { this.dims.forEach(d => { this.overlay.remove(d.g); this._unlabel(d.l); }); this.dims = []; this.mpts = []; this.emit('dims'); }
-  _measureAt(h) {
-    const n = h.face.normal.clone().transformDirection(h.object.matrixWorld), s = this.size();
-    if (this.mtype === 'thickness') {
-      const mats = []; this.eachMat(m => { mats.push([m, m.side]); m.side = THREE.DoubleSide; }); // inner walls are back faces
-      this.ray.set(h.point.clone().addScaledVector(n, -s * 1e-3), n.clone().negate());
-      const hit = this.ray.intersectObjects(this.meshes(), false)[0]; mats.forEach(([m, sd]) => (m.side = sd));
-      if (!hit) { this.emit('toast', 'No opposite wall found'); return; }
-      this._dimAdd('thickness', h.point.distanceTo(hit.point), h.point, hit.point); return;
-    }
-    this.mpts.push({ p: h.point.clone(), n });
-    if (this.mpts.length < 2) return;
-    const [a, b] = this.mpts; this.mpts = [];
-    if (this.mtype === 'ruler') this._dimAdd('ruler', a.p.distanceTo(b.p), a.p, b.p);
-    else this._dimAdd('angle', 180 - Math.acos(THREE.MathUtils.clamp(a.n.dot(b.n), -1, 1)) * 180 / Math.PI, a.p, b.p); // dihedral
   }
 
   // ---------- annotations, spotlight, tour ----------
@@ -752,20 +721,19 @@ export class Stage extends EventTarget {
     this._follow(true); const s = this.state;
     return {
       camera: { pos: this.camera.position.toArray(), target: this.controls.target.toArray() },
-      light: s.light, lightPreset: this.preset, shadows: this.floor.visible, backdrop: s.backdrop, grid: this.grid.visible,
+      light: s.light, lightPreset: this.preset, shadows: this.floor.visible, backdrop: s.backdrop,
       material: s.touched ? { rough: s.rough, metal: s.metal } : null,
-      env: { preset: s.env, intensity: s.envI }, explode: s.explode, units: { unit: this.unit, scale: this.unitScale },
+      env: { preset: s.env, intensity: s.envI }, explode: s.explode,
       annotations: this.annotations,
     };
   }
   applyConfig(c) {
     if (!c) return;
-    this.setBackdrop(c.backdrop || 'midnight'); this.setLight(c.light ?? 1); this.grid.visible = c.grid !== false;
+    this.setBackdrop(c.backdrop || 'midnight'); this.setLight(c.light ?? 1);
     if (LIGHT_PRESETS[c.lightPreset]) this.setLightPreset(c.lightPreset);
     if (c.shadows === false) this.setShadows(false);
     if (c.material) this.setMaterial(c.material.rough, c.material.metal);
     if (c.env && c.env.preset !== 'custom') this.setEnv(c.env.preset, c.env.intensity); else if (c.env) this.state.envI = c.env.intensity;
-    if (c.units) this.setUnit(c.units.unit, c.units.scale);
     this.annotations = Array.isArray(c.annotations) ? c.annotations : []; this._anchorLegacy(); this.buildAnnos(); this._follow(true);
     if (c.camera) { this.camera.position.set(...c.camera.pos); this.controls.target.set(...c.camera.target); this.controls.update(); }
     this.emit('config');

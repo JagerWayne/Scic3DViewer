@@ -696,3 +696,13 @@ def test_saving_a_project_is_a_job_too():
     text = "\n".join(line[2] for line in j["log"])
     assert j["done"] and not j["error"] and j["result"]["id"] == r.json()["id"] and "Uploading" in text and text.rstrip().endswith("saved in your Google Drive.")
     assert c.get("/api/drive-projects", headers=h).json()["total"] == 1
+
+
+def test_measuring_is_gone_from_tiers_and_api():
+    assert not any("measure" in t["tools"] for t in db.TIERS.values()) and not hasattr(db, "SHARE_FLAG_TOOL")
+    h = pro("nomeasure@x.com")
+    sid = share(h).json()["share_id"]
+    for body in (c.get(f"/api/projects/{sid}/config").json(), c.get(f"/api/projects/{sid}/edit", headers=h).json()):
+        assert "allow_measure" not in body and "allow_explode" not in body
+    assert "allow_measure" not in c.get("/api/projects", headers=h).json()[0]
+    assert "measure" not in c.get("/api/me", headers=h).json()["tools"]

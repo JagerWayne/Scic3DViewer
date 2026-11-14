@@ -14,7 +14,7 @@
 <main id="stage"></main>
 
 <!-- top bar: brand, menus, save, share, account -->
-<header id="topbar" class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-1 px-2">
+<header id="topbar" class="fixed top-0 inset-x-0 h-12 glass z-40 flex items-center gap-1 px-2">
   <b class="brand">Scic3D<span>Viewer</span></b>
   <nav id="menubar" class="flex items-center" aria-label="Main menu">
     <div class="menu"><button class="mbtn" data-menu="file" aria-haspopup="true" aria-expanded="false">File</button>
@@ -91,9 +91,6 @@
   <button class="tbtn" data-mode="fill" data-need="paint_fill" title="Edge-aware fill" aria-label="Fill"><svg viewBox="0 0 24 24"><path d="M5 11l7-7 7 7-7 7zM19 15s2 2.5 2 4a2 2 0 0 1-4 0c0-1.5 2-4 2-4z"/></svg></button>
   <hr class="border-white/10">
   <button class="tbtn" data-mode="annotate" title="Add a callout" aria-label="Callout"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></button>
-  <button class="tbtn" data-mode="ruler" data-need="measure" title="Ruler" aria-label="Ruler"><svg viewBox="0 0 24 24"><path d="M3 15L15 3l6 6-12 12zM7 11l2 2M10 8l2 2M13 5l2 2"/></svg></button>
-  <button class="tbtn" data-mode="angle" data-need="measure" title="Angle between faces" aria-label="Angle"><svg viewBox="0 0 24 24"><path d="M4 20h16M4 20L16 6M9 20a6 6 0 0 0-1.2-3.6"/></svg></button>
-  <button class="tbtn" data-mode="thickness" data-need="measure" title="Wall thickness" aria-label="Thickness"><svg viewBox="0 0 24 24"><path d="M4 4v16M20 4v16M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"/></svg></button>
 </nav>
 
 <!-- right inspector: tabs instead of one long list -->
@@ -108,7 +105,6 @@
     <div data-pane="scene">
       <details class="sec" open><summary>Stage</summary><div>
         <div class="row"><label for="backdrop">Backdrop</label><select id="backdrop" class="inp" style="width:140px"></select></div>
-        <div class="row"><label for="grid">Floor grid</label><input type="checkbox" id="grid" checked></div>
         <div class="row"><label for="light">Lights</label><input type="range" id="light" min="0" max="2" step=".05" value="1"></div>
         <div class="row"><label for="lpreset">Lighting</label><select id="lpreset" class="inp" style="width:140px"><option value="studio">Studio</option><option value="soft">Soft</option><option value="dramatic">Dramatic</option><option value="flat">Flat</option></select></div>
         <div class="row"><label for="shadows">Soft shadow</label><input type="checkbox" id="shadows" checked></div>
@@ -156,12 +152,6 @@
         <div class="row" data-need="paint_fill"><label for="pangle">Crease angle <span id="pangleV">30°</span></label><input type="range" id="pangle" min="5" max="180" step="1" value="30"></div>
         <div class="row"><button class="btn" id="undo" data-need="paint_undo">Undo</button><button class="btn" id="reset">Reset colors</button></div>
       </div></details>
-      <details class="sec"><summary>Measure</summary><div data-need="measure">
-        <div class="row"><label for="unit">Unit</label><select id="unit" class="inp" style="width:110px"><option>units</option><option>mm</option><option>cm</option><option>in</option></select></div>
-        <div class="row"><label for="uscale">Scale factor</label><input type="number" id="uscale" class="inp" value="1" min="0.0001" step="any" style="width:110px"></div>
-        <button class="btn" id="clearDims">Clear measurements</button>
-        <p class="text-xs text-slate-400">Ruler: 2 points. Angle: 2 faces. Thick: 1 point.</p>
-      </div></details>
       <details class="sec" id="secOptimize"><summary>Optimize mesh</summary><div data-need="decimate">
         <div class="row"><label for="keep">Keep <span id="keepV">50%</span></label><input type="range" id="keep" min="5" max="95" step="5" value="50"></div>
         <div class="row"><button class="btn btn-p" id="decimate">Simplify</button><button class="btn" id="revert">Revert</button></div>
@@ -179,6 +169,9 @@
     </div>
   </div>
 </aside>
+<button id="panelToggle" aria-label="Collapse inspector" aria-expanded="true" aria-controls="panel" title="Show or hide the inspector">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+</button>
 
 <div id="tour"></div>
 

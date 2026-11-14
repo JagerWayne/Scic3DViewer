@@ -41,26 +41,32 @@ export async function run(p, get, fail) {
   box.append(cv, labels);
   const ctx = cv.getContext('2d');
   const chips = annos.map((a, i) => { const e = Object.assign(document.createElement('button'), { className: 'lbl callout', type: 'button', textContent: `${i + 1}. ${a.text}`, title: 'Turn to this callout' }); e.onclick = () => { stopTour(); showAnno(i); }; labels.append(e); return e; });
-  const badge = Object.assign(document.createElement('div'), { className: 'fixed left-3 bottom-3 z-10 text-xs text-slate-300 glass rounded-lg px-2 py-1', role: 'status' });
+  const badge = Object.assign(document.createElement('div'), { className: 'fixed left-3 top-14 z-10 text-xs text-slate-300 glass rounded-lg px-2 py-1', role: 'status' });
   if (!complete) { badge.textContent = 'Loading full quality…'; document.body.append(badge); (async () => { while (!(await readMore())) badge.textContent = `Loading full quality… ${(got / 1e6).toFixed(1)} MB`; pack = new Blob(parts); complete = true; fired = false; dirty = true; badge.remove(); })(); }
 
   const SEEN = .25; // a tag counts as visible when its surface faces the camera at least this much (old packs store 0 or 1)
-  let calloutsOn = true, tourBar = null, tourI = -1, tourTimer = null;
-  const stopTour = () => { clearInterval(tourTimer); tourTimer = null; if (tourBar) tourBar.querySelector('[data-play]').textContent = '▶ Tour'; };
-  if (annos.length) { // viewers can hide the tags, and step or play through them
+  let calloutsOn = true, tour = null, tourI = -1, tourTimer = null, playBtn = null;
+  const stopTour = () => { clearInterval(tourTimer); tourTimer = null; if (playBtn) playBtn.textContent = 'Play tour'; };
+  if (annos.length) { // viewers can hide the tags and step or play through them. Nothing sits over the bottom of the picture (that is where watermarks are):
+    // previous/next are round buttons at the middle of the two edges, the caption is at the top, play and stop live in the menu.
     const tb = Object.assign(document.createElement('button'), { className: 'btn on', textContent: 'Callouts', title: 'Show or hide the callout tags' });
     tb.setAttribute('aria-pressed', 'true');
-    tb.onclick = () => { calloutsOn = !calloutsOn; tb.classList.toggle('on', calloutsOn); tb.setAttribute('aria-pressed', calloutsOn); tourBar.classList.toggle('hidden', !calloutsOn); if (!calloutsOn) stopTour(); dirty = true; };
-    $('#rotate').before(tb);
-    tourBar = Object.assign(document.createElement('div'), { className: 'fixed bottom-4 left-1/2 -translate-x-1/2 z-20 glass rounded-2xl px-2 py-2 flex items-center gap-1', role: 'group' });
-    tourBar.setAttribute('aria-label', 'Callout tour');
-    const label = Object.assign(document.createElement('span'), { className: 'text-xs text-slate-300 px-2 truncate text-center', style: 'max-width:38vw;min-width:60px' }); label.setAttribute('aria-live', 'polite'); label.textContent = `${annos.length} callouts`;
-    const mk = (txt, aria, fn, extra = {}) => Object.assign(document.createElement('button'), { className: 'btn', type: 'button', textContent: txt, onclick: fn, ariaLabel: aria, ...extra });
-    const go = d => { tourI = tourI < 0 ? (d > 0 ? 0 : annos.length - 1) : (tourI + d + annos.length) % annos.length; label.textContent = `${tourI + 1}/${annos.length}: ${annos[tourI].text}`; showAnno(tourI); };
-    const play = mk('▶ Tour', 'Play or stop the callout tour', () => { if (tourTimer) return stopTour(); go(1); play.textContent = '■ Stop'; tourTimer = setInterval(() => go(1), 3800); });
-    play.dataset.play = '1';
-    tourBar.append(mk('◀', 'Previous callout', () => { stopTour(); go(-1); }), play, mk('▶', 'Next callout', () => { stopTour(); go(1); }), label);
-    document.body.append(tourBar);
+    tb.onclick = () => { calloutsOn = !calloutsOn; tb.classList.toggle('on', calloutsOn); tb.setAttribute('aria-pressed', calloutsOn); tour.classList.toggle('hidden', !calloutsOn); if (!calloutsOn) stopTour(); dirty = true; };
+    playBtn = Object.assign(document.createElement('button'), { className: 'btn', textContent: 'Play tour', title: 'Step through the callouts automatically' });
+    $('#rotate').before(tb, playBtn);
+    tour = Object.assign(document.createElement('div'), { className: 'fixed inset-0 z-10 pointer-events-none', role: 'group' });
+    tour.setAttribute('aria-label', 'Callout tour');
+    const caption = Object.assign(document.createElement('div'), { className: 'pointer-events-auto absolute left-1/2 -translate-x-1/2 glass rounded-xl px-3 py-1 text-xs text-slate-200 text-center hidden', style: 'top:6rem;max-width:min(80vw,28rem)' });
+    caption.setAttribute('aria-live', 'polite');
+    const go = d => { tourI = tourI < 0 ? (d > 0 ? 0 : annos.length - 1) : (tourI + d + annos.length) % annos.length; caption.textContent = `${tourI + 1}/${annos.length} · ${annos[tourI].text}`; caption.classList.remove('hidden'); showAnno(tourI); };
+    const arrow = (side, aria, d, path) => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: `pointer-events-auto absolute ${side}-2 top-1/2 -translate-y-1/2 glass rounded-full grid place-items-center`, style: 'width:44px;height:44px' });
+      b.setAttribute('aria-label', aria); b.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+      b.onclick = () => { stopTour(); go(d); }; return b;
+    };
+    playBtn.onclick = () => { if (tourTimer) return stopTour(); go(1); playBtn.textContent = 'Stop tour'; tourTimer = setInterval(() => go(1), 3800); };
+    tour.append(arrow('left', 'Previous callout', -1, 'M15 5l-7 7 7 7'), arrow('right', 'Next callout', 1, 'M9 5l7 7-7 7'), caption);
+    document.body.append(tour);
   }
   // start on the angle the creator was looking from
   const cam = cfg.camera; let A = 0, E = (el - 1) / 2;

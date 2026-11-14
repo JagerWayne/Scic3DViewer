@@ -5,7 +5,6 @@ body{background:#020617;color:#e2e8f0;font-family:system-ui,-apple-system,Segoe 
 .labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 .lbl{position:absolute;left:0;top:0;white-space:nowrap;font-size:12px;padding:3px 8px;border-radius:8px;background:rgba(15,23,42,.8);border:1px solid rgba(255,255,255,.2);color:#fff}
 .callout{pointer-events:auto;cursor:pointer;background:rgba(250,204,21,.92);color:#111;font-weight:600}
-.badge{background:rgba(8,145,178,.92)}
 .glass{background:rgba(15,23,42,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.1)}
 .btn{padding:4px 10px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);cursor:pointer;color:inherit;font-size:13px}
 .btn:hover:not(:disabled){background:rgba(255,255,255,.18)}
@@ -110,3 +109,14 @@ canvas:focus-visible{outline-offset:-3px}
 }
 
 #tour .btn{white-space:nowrap}
+
+/* the top bar and its menus stay above the tool rail and the inspector (dialogs are z-50, the toast z-60) */
+#topbar{z-index:40}
+/* a handle on the edge of the inspector: collapse it to see the whole scene, bring it back from the right edge */
+#panelToggle{position:fixed;top:50%;right:20rem;transform:translateY(-50%);z-index:25;width:20px;height:56px;border-radius:10px 0 0 10px;background:rgba(15,23,42,.85);border:1px solid rgba(255,255,255,.14);border-right:0;color:#cbd5e1;display:grid;place-items:center;cursor:pointer;padding:0}
+#panelToggle:hover{background:#0ea5e9;color:#fff}
+#panelToggle svg{transition:transform .2s}
+body.panel-closed #panelToggle{right:0}
+body.panel-closed #panelToggle svg{transform:rotate(180deg)}
+@media (max-width:768px){#panelToggle{display:none}} /* phones use the Panel button: the inspector is a bottom sheet there */
+@media (prefers-reduced-motion:reduce){#panelToggle svg{transition:none}}

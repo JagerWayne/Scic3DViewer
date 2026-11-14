@@ -41,7 +41,7 @@ itself being reachable by anyone does not matter.
 
 ## Features by area
 
-* **Studio**: a menu bar (File, Edit, View, Model), a tool rail with icons (select, move, rotate, scale, snap, paint, callout, measure), a tabbed inspector (Scene, Parts, Tools, Output) and a status bar (triangles, save state, snap step, links used this month). Parts outliner, gizmo with **snapping** (rotation 5/15/30/45/90 degrees, moves and scale 0.1 units, key S), **undo and redo** (Ctrl+Z, Ctrl+Shift+Z) for moves, callouts and paint, merge, paint and edge-aware fill, material and HDRI, lighting presets with soft shadow, slicer, exploded view, ruler/angle/thickness, **callouts that stay on their part** when it is moved, rotated, scaled or exploded, spotlight and tour, pedestal, simplify, transparent PNG and 360 WebM. Z-up files (STL, STEP, 3MF) load upright.
+* **Studio**: a menu bar (File, Edit, View, Model), a tool rail with icons (select, move, rotate, scale, snap, paint, callout), a tabbed inspector (Scene, Parts, Tools, Output) and a status bar (triangles, save state, snap step, links used this month). Parts outliner, gizmo with **snapping** (rotation 5/15/30/45/90 degrees, moves and scale 0.1 units, key S), **undo and redo** (Ctrl+Z, Ctrl+Shift+Z) for moves, callouts and paint, merge, paint and edge-aware fill, material and HDRI, lighting presets with soft shadow, slicer, exploded view, **callouts that stay on their part** when it is moved, rotated, scaled or exploded, spotlight and tour, pedestal, simplify, transparent PNG and 360 WebM. Z-up files (STL, STEP, 3MF) load upright.
 * **Save to Google Drive**: File, Save (Ctrl+S) stores the model and the whole scene in the user's own Drive; File, Open from Google Drive lists them with a preview, rename and delete. An unsaved-changes dot and a warning before leaving protect your work. Limits per tier: 10 / 100 / 1000 projects.
 * **Formats**: open GLB, GLTF, OBJ, STL, FBX, 3MF and (Enterprise) STEP; export GLB, OBJ, STL and USDZ (iPhone AR; vertex colors are not part of USDZ).
 * **Sharing**: a six-step wizard (title and password, download permission, quality, expiry, processing with a live preview, publish with link, QR code and embed code) with a moving timeline. File, My shared links (copy, open, edit and republish to the same address, revoke, delete). The viewer is a burger menu with front/side views, callout tags with tour buttons, zoom, fullscreen and auto-rotate.
@@ -70,7 +70,7 @@ python admin.py revoke  user@mail.com
 | Callouts | 2 | unlimited | unlimited |
 | New links per month | 30 | 150 | 5000 |
 | Saved projects (Google Drive) | 10 | 100 | 1000 |
-| Share permissions | view-only | download (GLB), explode | + ruler/caliper, GLB/OBJ/STL |
+| Export formats | none | GLB | GLB, OBJ, STL, USDZ |
 
 ### 360° picture links (view-only)
 
@@ -87,7 +87,7 @@ The server enforces the limits and the watermark; the browser cannot choose them
 
 The pack also holds a 320 px preview of every picture: the viewer draws those while you drag or spin (smooth on phones) and swaps in the full picture after 250 ms on the same angle. Links published before this change keep working but only get the speed-ups that need no republishing.
 
-Measure, exploded view and part visibility are not available on picture links. Pictures can still be screenshotted.
+Part visibility is not available on picture links (exploded view and cross-sections are drawn into the pictures). Pictures can still be screenshotted.
 
 The server checks size, callout count, share permissions, and custom `.hdr` uploads. Editing tools (slicer, paint fill,
 decimation, ...) run in the browser and are gated in the UI only: a determined user can bypass them with devtools.

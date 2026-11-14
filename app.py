@@ -388,7 +388,7 @@ class Patch(BaseModel):
 def my_projects(u=Depends(current_user)):
     ids = db.license_ids(u["email"])
     with db.connect() as c:
-        rows = c.execute(f"SELECT share_id,title,kind,created_at,views,allow_download,allow_measure,allow_explode,expires_at,"
+        rows = c.execute(f"SELECT share_id,title,kind,created_at,views,allow_download,expires_at,"
                          f"revoked,pw_hash IS NOT NULL AS locked,drive_ids FROM shares WHERE license_id IN ({','.join('?' * len(ids))}) "
                          f"ORDER BY created_at DESC", ids).fetchall()
     out = []
@@ -420,8 +420,7 @@ def edit_project(share_id: str, body: Patch, u=Depends(current_user)):
 @app.get("/api/projects/{share_id}/edit")
 def project_for_edit(share_id: str, u=Depends(current_user)):  # owner-only: ignores expiry and password
     r = owned_share(share_id, u)
-    return {"title": r["title"], "config": json.loads(r["config"]), "allow_download": bool(r["allow_download"]),
-            "allow_measure": bool(r["allow_measure"]), "allow_explode": bool(r["allow_explode"])}
+    return {"title": r["title"], "config": json.loads(r["config"]), "allow_download": bool(r["allow_download"])}
 
 
 @app.get("/api/projects/{share_id}/edit-model")
@@ -438,8 +437,7 @@ def share_config(share_id: str, request: Request):
         c.execute("UPDATE shares SET views=views+1 WHERE share_id=?", (share_id,))
     db.log(r["license_id"], "view", request.client.host, share_id)
     return {"title": r["title"], "config": json.loads(r["config"]), "formats": json.loads(r["formats"]),
-            "allow_download": bool(r["allow_download"]), "allow_measure": bool(r["allow_measure"]),
-            "allow_explode": bool(r["allow_explode"]), "kind": r["kind"] or "model",
+            "allow_download": bool(r["allow_download"]), "kind": r["kind"] or "model",
             "watermark": json.loads(r["wm"]) if r["wm"] else None}
 
 
