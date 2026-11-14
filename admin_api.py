@@ -186,6 +186,11 @@ def register(app, current_user, rate_limit, remove_share):
                 shares = c.execute(f"SELECT * FROM shares WHERE license_id IN ({q})", ids).fetchall()
             for s in shares:
                 remove_share(s)
+            with db.connect() as c:
+                projects = c.execute(f"SELECT * FROM drive_projects WHERE license_id IN ({q})", ids).fetchall()
+                c.execute(f"DELETE FROM drive_projects WHERE license_id IN ({q})", ids)
+            for pr in projects:
+                storage.delete(pr["license_id"], pr["drive_id"])
             for i in ids:
                 storage.disconnect(i)
             with db.connect() as c:

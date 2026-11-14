@@ -17,7 +17,6 @@ LOGIN_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", "htt
 if BASE_URL.startswith(("http://127.0.0.1", "http://localhost")):
     os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")  # plain http is only tolerated for local testing
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
-_pending: dict = {}   # state -> (license_id, code_verifier, expires)   shortcut: in-memory, single process
 _svc: dict = {}       # license_id -> (service, folder_id)
 
 
@@ -49,21 +48,26 @@ def begin(purpose: str, lid: int | None = None) -> str:
     extra = {"prompt": "select_account", "access_type": "offline"} if purpose == "login" else {"access_type": "offline", "prompt": "consent"}
     url, _ = flow.authorization_url(state=state, **extra)
     now = time.time()
-    for k in [k for k, v in _pending.items() if v[3] < now]:
-        _pending.pop(k)
-    if len(_pending) > 1000:
-        raise ValueError("busy")
-    _pending[state] = (purpose, lid, flow.code_verifier, now + 600)
+    with db.connect() as c:  # sign-in state lives in SQLite, so any server worker can finish a sign-in another one started
+        c.execute("DELETE FROM oauth_pending WHERE expires<?", (now,))
+        if c.execute("SELECT COUNT(*) FROM oauth_pending").fetchone()[0] > 1000:
+            raise ValueError("busy")
+        c.execute("INSERT INTO oauth_pending VALUES(?,?,?,?,?)", (state, purpose, lid, flow.code_verifier, now + 600))
     return url
 
 
 def purpose(state: str):
-    return _pending.get(state, (None,))[0]
+    with db.connect() as c:
+        r = c.execute("SELECT purpose FROM oauth_pending WHERE state=?", (state,)).fetchone()
+    return r[0] if r else None
 
 
 def finish(state: str, code: str):
     """One-time state check + code exchange. Returns ('login', None, google_claims) or ('drive', license_id, None)."""
-    kind, lid, verifier, exp = _pending.pop(state, (None, None, None, 0))
+    with db.connect() as c:  # one-time: read and delete together
+        r = c.execute("SELECT purpose, license_id, verifier, expires FROM oauth_pending WHERE state=?", (state,)).fetchone()
+        c.execute("DELETE FROM oauth_pending WHERE state=?", (state,))
+    kind, lid, verifier, exp = r if r else (None, None, None, 0)
     if kind is None or exp < time.time():
         raise ValueError("Sign-in expired, please try again")
     flow = _flow(LOGIN_SCOPES + SCOPES if kind == "login" else SCOPES, state); flow.code_verifier = verifier; flow.fetch_token(code=code)

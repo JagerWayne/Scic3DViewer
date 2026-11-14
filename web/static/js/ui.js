@@ -35,7 +35,7 @@ export function mountOutliner(stage, el, editable) {
 
 // Bottom bar: annotation toggle + step / auto-play through annotation stops.
 export function mountTour(stage, el, canTour, onLocked) {
-  el.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-20 glass rounded-2xl px-3 py-2 flex items-center gap-2';
+  el.className = 'fixed bottom-10 left-1/2 -translate-x-1/2 z-20 glass rounded-2xl px-3 py-2 flex items-center gap-2';
   const label = Object.assign(document.createElement('span'), { className: 'text-xs text-slate-300 min-w-[90px] text-center', textContent: 'No callouts' });
   const gate = fn => () => (canTour ? fn() : onLocked());
   const play = btn('▶ Tour', 'Play tour', gate(() => (stage._tour ? stage.tourStop() : stage.tourPlay())), 'btn'),
@@ -44,4 +44,35 @@ export function mountTour(stage, el, canTour, onLocked) {
   const upd = () => { label.textContent = stage.annotations.length ? (stage.pinned == null ? `${stage.annotations.length} callouts` : `Stop ${stage.pinned + 1}/${stage.annotations.length}`) : 'No callouts'; };
   stage.addEventListener('annos', upd); stage.addEventListener('focus', upd); stage.addEventListener('config', upd);
   stage.addEventListener('tour', e => (play.textContent = e.detail ? '■ Stop' : '▶ Tour'));
+}
+
+// Dropdown menus of the top bar: click or hover to switch, arrow keys, Escape and outside click to close.
+export function mountMenus() {
+  const btns = [...document.querySelectorAll('[data-menu]')];
+  const panel = b => document.getElementById('menu-' + b.dataset.menu);
+  const items = p => [...p.querySelectorAll('.mitem:not(:disabled):not(.hidden)')];
+  const close = () => btns.forEach(b => { b.setAttribute('aria-expanded', 'false'); panel(b).classList.add('hidden'); });
+  const isOpen = () => btns.some(b => b.getAttribute('aria-expanded') === 'true');
+  const open = (b, focusFirst) => {
+    close(); const p = panel(b); p.classList.remove('hidden');
+    const r = b.getBoundingClientRect(); p.style.top = r.bottom + 4 + 'px'; p.style.left = Math.max(8, Math.min(r.left, innerWidth - p.offsetWidth - 8)) + 'px';
+    b.setAttribute('aria-expanded', 'true'); if (focusFirst) items(p)[0]?.focus();
+  };
+  btns.forEach(b => {
+    b.addEventListener('click', () => (b.getAttribute('aria-expanded') === 'true' ? close() : open(b)));
+    b.addEventListener('mouseenter', () => { if (isOpen() && b.getAttribute('aria-expanded') !== 'true') open(b); });
+    b.addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(b, true); } });
+    panel(b).addEventListener('click', e => { if (e.target.closest('.mitem')) close(); }); // choosing an item closes the menu
+    panel(b).addEventListener('keydown', e => {
+      const list = items(panel(b)), i = list.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length]?.focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length]?.focus(); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { const n = btns[(btns.indexOf(b) + (e.key === 'ArrowRight' ? 1 : -1) + btns.length) % btns.length]; open(n, true); }
+      else if (e.key === 'Escape') { close(); b.focus(); }
+    });
+  });
+  document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu')) close(); }, true);
+  addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  addEventListener('resize', close);
+  return close;
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Stage, BACKDROPS } from '/static/js/stage.js';
-import { $, toast, download, mountOutliner, mountTour } from '/static/js/ui.js';
+import { $, toast, download, mountOutliner, mountTour, mountMenus } from '/static/js/ui.js';
 
 const MB = 1024 * 1024;
 const TIER_FOR = { paint_fill: 'PRO', paint_undo: 'ENTERPRISE', assembly: 'PRO', tour: 'PRO', slicer: 'PRO', explode: 'PRO', measure: 'ENTERPRISE', decimate: 'PRO', base: 'PRO', hdri: 'PRO', capture: 'PRO', cad_import: 'ENTERPRISE' };
@@ -25,9 +25,9 @@ const show = (id, v = true) => $('#' + id).classList.toggle('hidden', !v);
 
 // ---------- account / tier gating ----------
 function applyMe() {
-  $('#tier').textContent = me.tier;
+  $('#tier').textContent = me.tier; $('#initial').textContent = (me.name || me.email || '?').trim()[0].toUpperCase();
   $('#who').textContent = me.name + (me.expires_at ? ' · until ' + new Date(me.expires_at * 1000).toLocaleDateString() : '');
-  stage.maxAnnotations = me.max_annotations; stage.gizmo = can('assembly');
+  stage.maxAnnotations = me.max_annotations; stage.gizmo = can('assembly'); stage.canPaintUndo = can('paint_undo'); updateStatus();
   document.querySelectorAll('[data-need]').forEach(el => {
     const ok = can(el.dataset.need); el.classList.toggle('opacity-50', !ok);
     if (el.tagName === 'BUTTON') { el.title = ok ? el.title : `Requires ${TIER_FOR[el.dataset.need]}`; return; } // click handlers toast via need()
@@ -59,13 +59,17 @@ on('signout', 'click', () => { token = null; store.set('scic_token'); location.r
 
 // ---------- files ----------
 async function loadFiles(files, replace) {
-  if (replace) { editing = null; stage.assembly.clear(); stage.annotations = []; stage.buildAnnos(); stage.select(null); stage.setBase(null); stage.clearDims(); }
+  if (replace) {
+    if (dirty && !confirm('Discard your unsaved changes?')) return;
+    editing = null; current = null; stage.assembly.clear(); stage.annotations = []; stage.buildAnnos(); stage.select(null); stage.setBase(null); stage.clearDims();
+    stage.history = []; stage.redoStack = []; stage.emit('history'); setDirty(false);
+  }
   for (const f of files) {
     if (/\.(step|stp)$/i.test(f.name) && !need('cad_import')) continue;
     if (f.size > me.max_mb * MB) { toast(`${f.name} is over the ${me.max_mb} MB limit of the ${me.tier} tier`); continue; }
     try { await stage.loadFile(f); if (!modelName || replace) modelName = f.name.replace(/\.[^.]+$/, ''); } catch (err) { toast(err.message); }
   }
-  syncSliders();
+  syncSliders(); markDirty();
 }
 on('open', 'click', () => { $('#file').dataset.replace = '1'; $('#file').click(); });
 on('add', 'click', () => { if (need('assembly')) { $('#file').dataset.replace = ''; $('#file').click(); } });
@@ -84,22 +88,28 @@ document.querySelectorAll('#tools [data-gizmo]').forEach(b => b.addEventListener
   stage.setMode('select'); stage.setGizmoMode(b.dataset.gizmo); setActive(b);
   if (!stage.selected) toast('Click a part to attach the gizmo'); else stage.select(stage.selected);
 }));
-function setActive(b) { document.querySelectorAll('#tools .btn').forEach(x => x.classList.toggle('on', x === b)); }
+function setActive(b) { document.querySelectorAll('#tools [data-mode],#tools [data-gizmo]').forEach(x => x.classList.toggle('on', x === b)); }
 addEventListener('keydown', e => {
+  const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (mod && k === 's') { e.preventDefault(); return saveProject(false); }
   if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
-  const g = { w: 'translate', e: 'rotate', r: 'scale' }[e.key.toLowerCase()];
+  if (mod && k === 'z') { e.preventDefault(); return e.shiftKey ? stage.redo() : stage.undo(); }
+  if (mod && k === 'y') { e.preventDefault(); return stage.redo(); }
+  if (mod) return;
+  const g = { w: 'translate', e: 'rotate', r: 'scale' }[k];
   if (g && can('assembly')) { stage.setGizmoMode(g); setActive($(`[data-gizmo=${g}]`)); }
+  if (k === 's') toggleSnap();
+  if (e.key === '?') show('helpModal');
   if (e.key === 'Escape') { stage.setMode('select'); stage.unpin(); setActive($('[data-mode=select]')); }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && can('paint_undo')) { e.preventDefault(); stage.undo(); }
 });
-stage.addEventListener('locked', () => toast(`${me.tier} tier allows ${me.max_annotations} callouts. Upgrade for unlimited.`));
+stage.addEventListener('locked', e => toast(e.detail === 'paint_undo' ? 'Undoing paint strokes needs the ENTERPRISE tier' : `${me.tier} tier allows ${me.max_annotations} callouts. Upgrade for unlimited.`));
 stage.addEventListener('toast', e => toast(e.detail));
 on('panelBtn', 'click', () => $('#panel').classList.toggle('closed'));
 
 // ---------- panel controls ----------
 const bd = $('#backdrop'); Object.keys(BACKDROPS).forEach(k => bd.add(new Option(k[0].toUpperCase() + k.slice(1), k)));
 on('backdrop', 'change', () => stage.setBackdrop(val('backdrop')));
-on('grid', 'change', e => (stage.grid.visible = e.target.checked));
+on('grid', 'change', e => { stage.grid.visible = e.target.checked; $('#vGrid').setAttribute('aria-checked', e.target.checked); });
 on('light', 'input', () => stage.setLight(+val('light')));
 const mat = () => stage.setMaterial(+val('rough'), +val('metal'));
 on('rough', 'input', mat); on('metal', 'input', mat);
@@ -113,7 +123,7 @@ on('hdr', 'change', async e => {
 on('pcolor', 'input', () => stage.paintColor.set(val('pcolor')));
 on('pradius', 'input', () => (stage.brushR = +val('pradius')));
 on('pangle', 'input', () => { stage.fillAngle = +val('pangle'); $('#pangleV').textContent = val('pangle') + '°'; });
-on('undo', 'click', () => need('paint_undo') && stage.undo());
+on('undo', 'click', () => stage.undo());
 on('reset', 'click', () => stage.resetColors());
 
 function syncSliders() { // slicer range follows the model's Z extent
@@ -134,8 +144,8 @@ function updateExplode() {
 on('unit', 'change', () => stage.setUnit(val('unit'), +val('uscale') || 1));
 on('uscale', 'input', () => stage.setUnit(val('unit'), +val('uscale') || 1));
 on('clearDims', 'click', () => stage.clearDims());
-on('zup', 'click', () => { if (!stage.meshesAll().length) return toast('Load a model first'); stage.zUpToYUp(); toast('Model turned upright'); });
-on('merge', 'click', () => { if (need('assembly')) { stage.mergeAll(); toast('Merged into one mesh (textures are baked to vertex colors)'); } });
+on('zup', 'click', () => { if (!stage.meshesAll().length) return toast('Load a model first'); stage.zUpToYUp(); markDirty(); toast('Model turned upright'); });
+on('merge', 'click', () => { if (need('assembly')) { stage.mergeAll(); markDirty(); toast('Merged into one mesh (textures are baked to vertex colors)'); } });
 
 on('bapply', 'click', () => stage.setBase({ shape: val('bshape'), radius: +val('bradius'), height: +val('bheight'), finish: val('bfinish') }));
 on('bremove', 'click', () => stage.setBase(null));
@@ -153,6 +163,111 @@ on('webm', 'click', async () => {
   try { download(await stage.captureWebM(6), 'scic3d-360.webm'); } catch (e) { toast(e.message); }
   b.disabled = false; b.textContent = '360° WebM';
 });
+
+// ---------- menus, tabs, snapping, undo/redo, view presets ----------
+mountMenus();
+const openPanel = () => { $('#panel').classList.remove('closed'); $('#vPanel').setAttribute('aria-checked', true); };
+function showTab(name) {
+  document.querySelectorAll('#panel [data-tab]').forEach(t => { const on = t.dataset.tab === name; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
+  document.querySelectorAll('#panel [data-pane]').forEach(pn => pn.classList.toggle('hidden', pn.dataset.pane !== name));
+}
+document.querySelectorAll('#panel [data-tab]').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+on('mOptimize', 'click', () => { if (!need('decimate')) return; openPanel(); showTab('tools'); $('#secOptimize').open = true; });
+on('mPedestal', 'click', () => { if (!need('base')) return; openPanel(); showTab('scene'); $('#secPedestal').open = true; });
+function toggleSnap() { stage.setSnap(!stage.snap.on, +val('snapDeg')); }
+stage.addEventListener('snap', () => { const on = stage.snap.on; $('#snapBtn').setAttribute('aria-pressed', on); $('#mSnap').setAttribute('aria-checked', on); });
+on('snapBtn', 'click', toggleSnap); on('mSnap', 'click', toggleSnap);
+on('snapDeg', 'change', () => stage.setSnap(stage.snap.on, +val('snapDeg')));
+const historyUi = () => { $('#mUndo').disabled = !stage.history.length; $('#mRedo').disabled = !stage.redoStack.length; };
+stage.addEventListener('history', historyUi); historyUi();
+on('mUndo', 'click', () => stage.undo()); on('mRedo', 'click', () => stage.redo());
+on('mDelete', 'click', () => {
+  const part = stage.selected; if (!part) return toast('Select a part first'); if (!need('assembly')) return;
+  if (confirm(`Delete "${part.name || 'this part'}"?`)) { stage.remove(part); markDirty(); }
+});
+function look(dir) { const t = stage.controls.target, d = stage.camera.position.distanceTo(t) || 3; stage.camera.position.copy(t).addScaledVector(new THREE.Vector3(...dir).normalize(), d); stage.controls.update(); }
+on('vFrame', 'click', () => stage.frame()); on('vFront', 'click', () => look([0, .15, 1])); on('vSide', 'click', () => look([1, .15, 0])); on('vTop', 'click', () => look([0, 1, .001]));
+on('vGrid', 'click', () => { const g = $('#grid'); g.checked = !g.checked; g.dispatchEvent(new Event('change')); });
+on('vCallouts', 'click', () => { const on = $('#vCallouts').getAttribute('aria-checked') !== 'true'; stage.showAnnos(on); $('#vCallouts').setAttribute('aria-checked', on); });
+on('vPanel', 'click', () => { const closed = $('#panel').classList.toggle('closed'); $('#vPanel').setAttribute('aria-checked', !closed); });
+on('vFull', 'click', () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()));
+on('vHelp', 'click', () => show('helpModal')); on('helpClose', 'click', () => show('helpModal', false));
+
+// ---------- save and open projects in the user's own Google Drive ----------
+let current = null, dirty = false, pendingAsNew = false, openOffset = 0; // current = {id, name} of the Drive project that is open
+function renderSaveState() { $('#saveState').textContent = dirty ? 'Unsaved changes' : current ? `Saved · ${current.name}` : 'Not saved'; }
+function setDirty(v) { dirty = v; $('#saveDot').hidden = !v; renderSaveState(); }
+function markDirty() { if (!dirty && stage.meshesAll().length) setDirty(true); }
+['history', 'tree', 'annos'].forEach(ev => stage.addEventListener(ev, markDirty));
+$('#panel').addEventListener('input', markDirty); $('#panel').addEventListener('change', markDirty);
+addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+function updateStatus() { if (me) $('#quota').textContent = `${me.shares_month}/${me.max_shares_month} links this month · ${me.projects_count}/${me.max_projects} projects`; }
+function snapshot() { // small picture for the Open dialog
+  const c = Object.assign(document.createElement('canvas'), { width: 220, height: 150 }), x = c.getContext('2d'), src = stage.renderer.domElement;
+  x.fillStyle = '#0f172a'; x.fillRect(0, 0, 220, 150);
+  const k = Math.min(220 / src.width, 150 / src.height); x.drawImage(src, (220 - src.width * k) / 2, (150 - src.height * k) / 2, src.width * k, src.height * k);
+  return c.toDataURL('image/jpeg', .7);
+}
+function saveProject(asNew) {
+  if (!me) return;
+  if (!stage.meshesAll().length) return toast('Load a model first');
+  if (!me.drive_connected) { show('driveModal'); return toast('Connect your Google Drive to save projects'); }
+  if (current && !asNew) return doSave(current.name, false).then(err => err && toast(err));
+  pendingAsNew = asNew; $('#saveName').value = current?.name || modelName || 'Untitled'; show('saveErr', false); show('saveModal'); $('#saveName').select();
+}
+async function doSave(name, asNew) { // returns an error message, or null when saved
+  $('#saveState').textContent = 'Saving…';
+  try {
+    const glb = await stage.exportAs('glb');
+    if (glb.size > me.max_mb * MB) throw new Error(`Model is over the ${me.max_mb} MB limit of the ${me.tier} tier`);
+    const fd = new FormData();
+    fd.append('model', glb, 'model.glb'); fd.append('config', JSON.stringify(stage.getConfig())); fd.append('name', name); fd.append('thumb', snapshot());
+    if (current && !asNew) fd.append('project_id', current.id);
+    const r = await call('/api/drive-projects', { method: 'POST', body: fd });
+    if (!current || asNew) me.projects_count++;
+    current = { id: r.id, name: r.name }; modelName = r.name; setDirty(false); updateStatus(); toast('Saved to your Google Drive');
+    return null;
+  } catch (e) { renderSaveState(); return e.message; }
+}
+on('saveForm', 'submit', async e => {
+  e.preventDefault(); const b = $('#saveGo'); b.disabled = true; show('saveErr', false);
+  const err = await doSave(val('saveName').trim() || 'Untitled', pendingAsNew); b.disabled = false;
+  if (err) { $('#saveErr').textContent = err; show('saveErr'); } else show('saveModal', false);
+});
+on('saveCancel', 'click', () => show('saveModal', false));
+on('saveBtn', 'click', () => saveProject(false)); on('mSave', 'click', () => saveProject(false)); on('mSaveAs', 'click', () => saveProject(true));
+async function openList(more) {
+  const grid = $('#openGrid'); if (!more) { grid.replaceChildren(); openOffset = 0; }
+  const r = await call(`/api/drive-projects?limit=24&offset=${openOffset}`);
+  openOffset += r.items.length; me.projects_count = r.total; updateStatus();
+  $('#openCount').textContent = `${r.total} of ${r.max} saved projects`;
+  const btn = (txt, fn) => Object.assign(document.createElement('button'), { className: 'btn', textContent: txt, onclick: fn, style: 'padding:2px 8px;font-size:12px' });
+  r.items.forEach(p => {
+    const card = Object.assign(document.createElement('div'), { className: 'pcard' }), meta = Object.assign(document.createElement('div'), { className: 'meta' });
+    const pic = p.thumb ? Object.assign(document.createElement('img'), { src: p.thumb, alt: '' }) : Object.assign(document.createElement('div'), { className: 'ph' });
+    meta.append(Object.assign(document.createElement('b'), { textContent: p.name, className: 'truncate text-sm' }),
+      Object.assign(document.createElement('span'), { className: 'text-xs text-slate-400', textContent: `${new Date(p.updated_at * 1000).toLocaleDateString()} · ${(p.size / MB).toFixed(1)} MB` }));
+    const row = Object.assign(document.createElement('div'), { className: 'flex gap-1 pt-1' });
+    row.append(btn('Open', () => openProject(p.id)),
+      btn('Rename', async () => { const n = prompt('Project name', p.name); if (!n || !n.trim()) return; try { await call('/api/drive-projects/' + p.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n.trim() }) }); if (current?.id === p.id) { current.name = n.trim(); renderSaveState(); } openList(); } catch (e) { toast(e.message); } }),
+      btn('Delete', async () => { if (!confirm(`Delete "${p.name}" from your Google Drive? This cannot be undone.`)) return; try { await call('/api/drive-projects/' + p.id, { method: 'DELETE' }); if (current?.id === p.id) { current = null; renderSaveState(); } openList(); } catch (e) { toast(e.message); } }));
+    meta.append(row); card.append(pic, meta); grid.append(card);
+  });
+  show('openMore', openOffset < r.total); $('#openEmpty').textContent = r.total ? '' : 'No saved projects yet. Use File → Save to Google Drive.';
+}
+async function openProject(id) {
+  if (dirty && !confirm('Discard your unsaved changes?')) return;
+  try {
+    const [meta, buf] = await Promise.all([call(`/api/drive-projects/${id}`),
+      fetch(`/api/drive-projects/${id}/model`, { headers: { Authorization: 'Bearer ' + token } }).then(r => { if (!r.ok) throw new Error('Could not load the model from your Google Drive'); return r.arrayBuffer(); })]);
+    editing = null; stage.assembly.clear(); stage.base.clear(); stage.select(null); stage.clearDims(); stage.annotations = []; stage.buildAnnos();
+    await stage.loadSaved(buf); stage.applyConfig(meta.config); syncSliders();
+    stage.history = []; stage.redoStack = []; stage.emit('history');
+    current = { id: meta.id, name: meta.name }; modelName = meta.name; setDirty(false); show('openModal', false); toast('Project opened');
+  } catch (e) { toast(e.message); }
+}
+on('mOpenDrive', 'click', () => { if (!me.drive_connected) { show('driveModal'); return toast('Connect your Google Drive first'); } show('openModal'); openList().catch(e => toast(e.message)); });
+on('openClose', 'click', () => show('openModal', false)); on('openMore', 'click', () => openList(true).catch(e => toast(e.message)));
 
 // outliner, tour, callout list, counters
 mountOutliner(stage, $('#outliner'), true);
@@ -268,10 +383,10 @@ async function buildPack(P, onFrame) { // 'S3IM' + u32 index length + JSON index
   const t = await stage.renderTurntable({ az: P.az, el: P.el, elMin: P.elMin, elMax: Math.max(P.elMin, P.elMax), px: P.px, quality: P.q / 100,
     cancelled: () => cancelPack, onProgress: onFrame });
   let off = 0; const place = list => list.map(b => { const f = [off, b.size]; off += b.size; return f; });
-  const frames = place(t.blobs), thumbs = place(t.thumbs);
+  const thumbs = place(t.thumbs), frames = place(t.blobs); // previews first: the viewer can start as soon as they have arrived
   const ix = new TextEncoder().encode(JSON.stringify({ v: 1, mime: t.mime, w: t.w, h: t.h, az: t.az, el: t.el, elevs: t.elevs, frames, thumbs, anno: stage.annotations.length ? t.anno : null }));
   const head = new Uint8Array(8); head.set([83, 51, 73, 77]); new DataView(head.buffer).setUint32(4, ix.length, true);
-  const pack = new Blob([head, ix, ...t.blobs, ...t.thumbs]);
+  const pack = new Blob([head, ix, ...t.thumbs, ...t.blobs]);
   if (pack.size > me.images.max_mb * MB) throw new Error(`The pictures are ${(pack.size / MB).toFixed(0)} MB, over the ${me.images.max_mb} MB limit of the ${me.tier} tier. Choose a lower quality.`);
   return pack;
 }
@@ -318,6 +433,7 @@ async function publish() { // step 5: draw the pictures (with a live preview), u
     const url = location.origin + r.url; $('#sUrl').value = url;
     $('#sEmbed').value = `<iframe src="${url}" width="640" height="480" style="border:0" allow="fullscreen" allowfullscreen></iframe>`;
     if (!editing || !$('#sUpdate').checked) me.shares_month++;
+    updateStatus();
     goStep(6); showQr(url);
   } catch (e) { goStep(5, e.message === 'Cancelled' ? 'Cancelled. Go back to change the settings.' : e.message); }
   if (prev) URL.revokeObjectURL(prev);
@@ -330,7 +446,7 @@ async function editProject(id) {
       fetch(`/api/projects/${id}/edit-model`, { headers: { Authorization: 'Bearer ' + token } }).then(r => { if (!r.ok) throw new Error('Could not load the model from your Google Drive'); return r.arrayBuffer(); })]);
     stage.assembly.clear(); stage.base.clear(); stage.select(null); stage.clearDims();
     await stage.loadSaved(buf); stage.applyConfig(meta.config); syncSliders();
-    editing = { id, title: meta.title }; show('projectsModal', false);
+    editing = { id, title: meta.title }; current = null; stage.history = []; stage.redoStack = []; stage.emit('history'); setDirty(false); show('projectsModal', false);
     toast('Opened for editing. Share link, then Publish, updates the same link.');
   } catch (e) { toast(e.message); }
 }
@@ -385,7 +501,20 @@ on('shadows', 'change', e => stage.setShadows(e.target.checked));
 
 // ---------- phones: dialogs become bottom sheets and the other windows get out of the way ----------
 const modals = [...document.querySelectorAll('[id$="Modal"]')];
-modals.forEach(m => m.firstElementChild?.classList.add('modal-card'));
+modals.forEach(m => {
+  m.firstElementChild?.classList.add('modal-card'); m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true');
+  const h = m.querySelector('h2'); if (h) { h.id ||= m.id + 'Title'; m.setAttribute('aria-labelledby', h.id); }
+});
+const focusOpened = new MutationObserver(recs => recs.forEach(r => {
+  const m = r.target, isOpen = !m.classList.contains('hidden');
+  if (isOpen && !m._open) (m.querySelector('input:not([type=checkbox]):not([type=radio]),select,textarea') || m.querySelector('button,a'))?.focus();
+  m._open = isOpen;
+}));
+modals.forEach(m => focusOpened.observe(m, { attributes: true, attributeFilter: ['class'] }));
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  modals.filter(m => m.id !== 'authModal' && !m.classList.contains('hidden')).forEach(m => (m.id === 'shareModal' ? $('#sClose').click() : m.classList.add('hidden')));
+});
 new MutationObserver(() => document.body.classList.toggle('modal-open', modals.some(m => !m.classList.contains('hidden'))))
   .observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
 if (matchMedia('(max-width: 768px)').matches) $('#panel').classList.add('closed'); // start with the canvas, not the settings sheet

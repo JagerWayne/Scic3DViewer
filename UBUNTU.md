@@ -55,7 +55,7 @@ Open `https://YOUR-DOMAIN/studio`, sign in with Google, then `/admin` with the a
 | Create / list licenses | the **/admin** page, or `./admin.sh new`, `./admin.sh list` |
 | Backup (database + `secret.key`) | `./backup.sh`  (files appear in `backups/`) |
 | Automatic nightly backup | `crontab -e` and add: `0 3 * * * /home/wayne/python/s3dv/backup.sh >/dev/null 2>&1` |
-| Update the code | copy the new files over (keep `data/`, `.env`, `credentials.json`), run `bash setup.sh`, then `sudo systemctl restart scic3d` |
+| Update the code | `git pull`, run `bash setup.sh` (it installs new Python packages such as Pillow), then `sudo systemctl restart scic3d` |
 | Look at errors | `journalctl -u scic3d -n 100 --no-pager` |
 
 Copy the `backups/` zips off the server regularly. They contain secrets: keep them private. Without `secret.key` every user has to reconnect Google Drive.

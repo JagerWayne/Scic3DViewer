@@ -5,18 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>3D Viewer</title>
 <link rel="stylesheet" href="/static/app.css">
-<script type="importmap" nonce="{{NONCE}}">
-{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
-</script>
 <script src="https://cdn.tailwindcss.com/3.4.1"></script>
 </head>
 <body>
-<div id="stage"></div>
+<main id="stage"></main>
 
 <header class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-2 px-3">
-  <b id="title" class="truncate">Loading…</b>
+  <h1 id="title" class="truncate font-bold text-sm">Loading…</h1>
   <span class="flex-1"></span>
-  <button class="btn" id="menuBtn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" style="min-width:44px;min-height:36px">
+  <button class="btn" id="menuBtn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" aria-controls="menu" style="min-width:44px;min-height:36px">
     <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true"><path d="M1 1.5h16M1 7h16M1 12.5h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
   </button>
 </header>
@@ -25,41 +22,19 @@
   <div id="dl" class="hidden flex flex-col gap-1"><span class="text-xs text-slate-400 px-1">Download model</span></div>
   <button class="btn" id="rotate" title="Auto-rotate">Auto-rotate</button>
   <button class="btn" id="full" title="Fullscreen">Fullscreen</button>
-  <button class="btn" id="panelBtn">Parts</button>
+  <p class="text-xs text-slate-500 px-1 pt-1"><a class="underline" href="/privacy" target="_blank" rel="noopener">Privacy</a> &middot; <a class="underline" href="/terms" target="_blank" rel="noopener">Terms</a></p>
 </nav>
 
-<nav id="tools" class="hidden fixed left-3 top-16 glass rounded-xl p-1 z-20 flex flex-col gap-1">
-  <button class="btn on" data-mode="select">Orbit</button>
-  <button class="btn" data-mode="ruler">Ruler</button>
-  <button class="btn" data-mode="angle">Angle</button>
-  <button class="btn" data-mode="thickness">Thick</button>
-</nav>
-
-<aside id="panel" class="closed fixed right-0 top-12 bottom-0 w-72 glass z-20 overflow-y-auto">
-  <div class="flex items-center justify-between px-3 pt-3"><b class="text-sm">Parts &amp; tools</b><button class="btn" id="panelClose" aria-label="Close panel">✕</button></div>
-  <details class="sec" open><summary>Parts</summary><div><div id="outliner" class="max-h-64 overflow-y-auto"></div></div></details>
-  <details class="sec hidden" id="secExplode" open><summary>Exploded view</summary><div>
-    <div class="row"><label for="explode">Explode</label><input type="range" id="explode" min="0" max="100" step="1" value="0"></div>
-  </div></details>
-  <details class="sec hidden" id="secMeasure"><summary>Measure</summary><div>
-    <div class="row"><label for="unit">Unit</label><select id="unit" class="inp" style="width:110px"><option>units</option><option>mm</option><option>cm</option><option>in</option></select></div>
-    <div class="row"><label for="uscale">Scale factor</label><input type="number" id="uscale" class="inp" value="1" min="0.0001" step="any" style="width:110px"></div>
-    <button class="btn" id="clearDims">Clear</button>
-  </div></details>
-  <p class="text-xs text-slate-500 p-3"><a class="underline" href="/privacy" target="_blank" rel="noopener">Privacy</a> &middot; <a class="underline" href="/terms" target="_blank" rel="noopener">Terms</a></p>
-</aside>
-
-<div id="tour"></div>
-<div id="toast" class="hidden"></div>
-<div id="pwModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+<div id="toast" class="hidden" role="status" aria-live="polite"></div>
+<div id="pwModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
   <form id="pwForm" class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-3">
-    <h2 class="text-lg font-bold">This link is password protected</h2>
+    <h2 class="text-lg font-bold" id="pwTitle">This link is password protected</h2>
     <input class="inp" id="pwInput" type="password" autocomplete="off" required maxlength="64" aria-label="Password">
-    <p class="text-xs text-red-400 hidden" id="pwErr">Wrong password, try again.</p>
+    <p class="text-xs text-red-400 hidden" id="pwErr" role="alert">Wrong password, try again.</p>
     <button class="btn btn-p">Open</button>
   </form>
 </div>
-<div id="err" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-lg"></div>
+<div id="err" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-lg p-6 text-center" role="alert"></div>
 
 <script type="module" src="/static/js/viewer.js"></script>
 </body>

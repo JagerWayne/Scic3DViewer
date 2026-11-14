@@ -1,7 +1,7 @@
 # Scic3DViewer
 
 FastAPI + SQLite backend, Three.js + Tailwind frontend. The SQLite database and activity log (table `activity`) live
-under `./data` (override with `SCIC_DATA`). Shared models are stored only in Google Drive (see below).
+under `./data` (override with `SCIC_DATA`). Shared pictures, saved projects and models are stored only in Google Drive (see below).
 
 ## Run
 
@@ -41,9 +41,10 @@ itself being reachable by anyone does not matter.
 
 ## Features by area
 
-* **Studio**: parts outliner, gizmo, merge, paint and edge-aware fill, material and HDRI, lighting presets with soft shadow, slicer, exploded view, ruler/angle/thickness, callouts with spotlight and tour, pedestal, simplify, transparent PNG and 360 WebM.
+* **Studio**: a menu bar (File, Edit, View, Model), a tool rail with icons (select, move, rotate, scale, snap, paint, callout, measure), a tabbed inspector (Scene, Parts, Tools, Output) and a status bar (triangles, save state, snap step, links used this month). Parts outliner, gizmo with **snapping** (rotation 5/15/30/45/90 degrees, moves and scale 0.1 units, key S), **undo and redo** (Ctrl+Z, Ctrl+Shift+Z) for moves, callouts and paint, merge, paint and edge-aware fill, material and HDRI, lighting presets with soft shadow, slicer, exploded view, ruler/angle/thickness, **callouts that stay on their part** when it is moved, rotated, scaled or exploded, spotlight and tour, pedestal, simplify, transparent PNG and 360 WebM. Z-up files (STL, STEP, 3MF) load upright.
+* **Save to Google Drive**: File, Save (Ctrl+S) stores the model and the whole scene in the user's own Drive; File, Open from Google Drive lists them with a preview, rename and delete. An unsaved-changes dot and a warning before leaving protect your work. Limits per tier: 10 / 100 / 1000 projects.
 * **Formats**: open GLB, GLTF, OBJ, STL, FBX, 3MF and (Enterprise) STEP; export GLB, OBJ, STL and USDZ (iPhone AR; vertex colors are not part of USDZ).
-* **Sharing**: My projects panel (copy, open, edit and republish to the same address, revoke, delete), link expiry and password (Pro and up), QR code, embed code, fullscreen and auto-rotate in the viewer. Models are stored gzip-compressed (lossless) in the owner Drive.
+* **Sharing**: a six-step wizard (title and password, download permission, quality, expiry, processing with a live preview, publish with link, QR code and embed code) with a moving timeline. File, My shared links (copy, open, edit and republish to the same address, revoke, delete). The viewer is a burger menu with front/side views, callout tags with tour buttons, zoom, fullscreen and auto-rotate.
 * **Business**: license emails (SMTP), Stripe checkout that creates licenses automatically, Ubuntu install with systemd + Caddy HTTPS: **[UBUNTU.md](UBUNTU.md)**; Docker kit and backups: **[DEPLOY.md](DEPLOY.md)**.
 
 ## Licenses (admin only, local CLI, the admin panel does the same)
@@ -68,6 +69,7 @@ python admin.py revoke  user@mail.com
 | Upload / share size | 15 MB | 100 MB | 500 MB |
 | Callouts | 2 | unlimited | unlimited |
 | New links per month | 30 | 150 | 5000 |
+| Saved projects (Google Drive) | 10 | 100 | 1000 |
 | Share permissions | view-only | download (GLB), explode | + ruler/caliper, GLB/OBJ/STL |
 
 ### 360° picture links (view-only)
@@ -94,9 +96,10 @@ They cannot get a bigger upload, extra share permissions, or more formats on sha
 ## Security notes
 
 * Bearer-token sessions (30 days, stored hashed), no cookies, so no CSRF. Tokens live in `localStorage`; a strict CSP (per-request nonce) limits XSS.
-* Rate limits on register / share / view, request size cap, GLB magic-byte check, `.hdr` check, random 72-bit share ids.
-* Shared links are public to anyone with the URL, and the model is served as a normal file (no obfuscation, by design).
-* Emails are verified by Google (no typing someone else's email). The rate limiter is in-memory and per-process.
+* Rate limits on share / view / sign-in and the others, request size cap, GLB magic-byte check, random 72-bit share ids. The counters and the Google sign-in state are stored in SQLite, so several server workers share them.
+* Shared links are public to anyone with the URL, but visitors only receive pictures: the 3D model is never sent unless the owner allows a download, and the viewer does not even load a 3D engine. The watermark of a tier is drawn into every picture on the server (Pillow), so clean pictures cannot be downloaded from a link.
+* Big files (picture pack, model) are sent with an ETag and `Cache-Control: private, no-cache`: browsers keep them but ask first, so revoked or expired links stop at once, unchanged files are not sent again and Google Drive is not read again for them.
+* Emails are verified by Google (no typing someone else's email).
 
 ## Known limits
 

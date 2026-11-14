@@ -1,11 +1,10 @@
-import gzip, itertools, json, os, re, secrets, shutil, time, zlib
+import gzip, hashlib, itertools, json, os, re, secrets, shutil, time, zlib
 from html import escape
-from collections import defaultdict, deque
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -13,6 +12,7 @@ import admin_api
 import billing
 import db
 import storage
+import watermark as wmark
 
 db.init()
 WEB = Path(__file__).parent / "web"
@@ -28,17 +28,16 @@ CSP = ("default-src 'none'; script-src 'self' 'nonce-{n}' 'wasm-unsafe-eval' htt
        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src blob:; "
        "connect-src 'self' blob: data: https://www.gstatic.com https://cdn.jsdelivr.net; worker-src blob:; "
        "frame-ancestors {fa}; base-uri 'none'; form-action 'self'")
-_hits = defaultdict(deque)
 
 
 def rate_limit(request: Request, bucket: str, limit: int, per: int = 60):
-    q = _hits[(bucket, request.client.host)]
-    now = time.time()
-    while q and q[0] < now - per:
-        q.popleft()
-    if len(q) >= limit:
-        raise HTTPException(429, "Too many requests, slow down")
-    q.append(now)
+    """Counters live in SQLite (not in memory), so several server workers share one limit."""
+    now, ip = time.time(), request.client.host
+    with db.connect() as c:
+        c.execute("DELETE FROM rate_hits WHERE bucket=? AND ip=? AND ts<?", (bucket, ip, now - per))
+        if c.execute("SELECT COUNT(*) FROM rate_hits WHERE bucket=? AND ip=?", (bucket, ip)).fetchone()[0] >= limit:
+            raise HTTPException(429, "Too many requests, slow down")
+        c.execute("INSERT INTO rate_hits VALUES(?,?,?)", (bucket, ip, now))
 
 
 @app.middleware("http")
@@ -70,7 +69,7 @@ def me_payload(u):
     return {"name": u["name"], "email": u["email"], "tier": u["tier"], "expires_at": u["expires_at"],
             "is_admin": u["is_admin"], "billing_available": billing.configured(),
             "drive_available": storage.configured(), "drive_connected": storage.connected(u["license_id"]),
-            "shares_month": db.shares_this_month(u["email"]), **db.TIERS[u["tier"]]}
+            "shares_month": db.shares_this_month(u["email"]), "projects_count": db.projects_count(u["email"]), **db.TIERS[u["tier"]]}
 
 
 # ---------- pages ----------
@@ -232,11 +231,9 @@ def check_access(r, request: Request):
 @app.post("/api/projects/share")
 async def share(request: Request, model: UploadFile | None = File(None), config: str = Form("{}"),
                 title: str = Form("Untitled", max_length=120), allow_download: bool = Form(False),
-                allow_measure: bool = Form(False), allow_explode: bool = Form(False),
                 update_id: str = Form(""), expires_in_days: int = Form(0, ge=0, le=3650),
-                password: str = Form("", max_length=64), kind: str = Form("model"), watermark: str = Form("", max_length=40),
-                pack: UploadFile | None = File(None),
-                hdr: UploadFile | None = File(None), u=Depends(current_user)):
+                password: str = Form("", max_length=64), kind: str = Form("images"), watermark: str = Form("", max_length=40),
+                pack: UploadFile | None = File(None), u=Depends(current_user)):
     rate_limit(request, "share", 20)
     lid = u["license_id"]
     if not storage.connected(lid):
@@ -255,38 +252,35 @@ async def share(request: Request, model: UploadFile | None = File(None), config:
     n_ann = len(cfg.get("annotations") or [])
     if tier["max_annotations"] is not None and n_ann > tier["max_annotations"]:
         raise HTTPException(403, f"{u['tier']} tier allows {tier['max_annotations']} annotations")
-    flags = {"allow_download": allow_download, "allow_measure": allow_measure, "allow_explode": allow_explode}
-    if (any(flags.values()) or expires_in_days or password) and not tier["share_permissions"]:
-        raise HTTPException(403, "Custom share permissions, expiry and passwords need the PRO tier")
+    if kind != "images":
+        raise HTTPException(400, "Only 360 degree picture links can be created")
+    if (allow_download or expires_in_days or password) and not tier["share_permissions"]:
+        raise HTTPException(403, "Model downloads, link expiry and passwords need the PRO tier")
     if password and len(password) < 4:
         raise HTTPException(400, "Password must have at least 4 characters")
-    for flag, tool in db.SHARE_FLAG_TOOL.items():
-        if flags[flag] and tool not in tier["tools"]:
-            raise HTTPException(403, f"{tool} is not included in your tier")
-    if kind not in ("model", "images"):
-        raise HTTPException(400, "kind must be model or images")
     im = tier["images"]
-    if kind == "images":
-        if pack is None or not pack.filename:
-            raise HTTPException(400, "Image links need the rendered image pack")
-        flags["allow_measure"] = flags["allow_explode"] = False  # these need real 3D geometry, which image links never send
-        hdr = None
-    has_model = model is not None and bool(model.filename)  # picture links only keep the model when visitors may download it
-    if (kind == "model" or allow_download) and not has_model:
+    if pack is None or not pack.filename:
+        raise HTTPException(400, "The rendered picture pack is missing")
+    has_model = model is not None and bool(model.filename)  # the model is only kept when visitors may download it
+    if allow_download and not has_model:
         raise HTTPException(400, "The model file is missing")
     if has_model:
         if await model.read(4) != b"glTF":
             raise HTTPException(400, "Model must be a binary .glb")
         await model.seek(0)
     sid = update_id or secrets.token_urlsafe(9)
-    if kind == "images":
-        try:
-            await _save_pack(pack, db.SHARES / f"{sid}.pack", im)
-        except BaseException:
-            (db.SHARES / f"{sid}.pack").unlink(missing_ok=True)
-            raise
-    dest, size = db.SHARES / f"{sid}.glb", 0
+    mode, text = im["watermark"], watermark.strip()
+    wm = {"text": "Scic3DViewer", "tile": True, "cross": True} if mode == "forced" else \
+         {"text": text, "tile": False, "cross": False} if mode == "custom" and text else None  # chosen here, never by the browser
+    packfile, dest, size = db.SHARES / f"{sid}.pack", db.SHARES / f"{sid}.glb", 0
     try:
+        await _save_pack(pack, packfile, im)
+        if wm:  # drawn into every picture: nobody can fetch clean pictures from the link
+            try:
+                await run_in_threadpool(wmark.bake, packfile, wm["text"], wm["tile"], wm["cross"])
+            except Exception:
+                raise HTTPException(400, "The pictures could not be read")
+            wm["baked"] = True
         if has_model:
             with open(dest, "wb") as f:
                 while chunk := await model.read(db.MB):
@@ -296,19 +290,13 @@ async def share(request: Request, model: UploadFile | None = File(None), config:
                     f.write(chunk)
     except BaseException:
         dest.unlink(missing_ok=True)
-        (db.SHARES / f"{sid}.pack").unlink(missing_ok=True)
+        packfile.unlink(missing_ok=True)
         raise
-    if hdr is not None and hdr.filename:  # optional custom environment map
-        data = await hdr.read(20 * db.MB + 1)
-        if "hdri" not in tier["tools"] or len(data) > 20 * db.MB or not data.startswith(b"#?"):
-            dest.unlink(missing_ok=True)
-            raise HTTPException(400, "Invalid or not allowed .hdr file (max 20 MB, PRO tier)")
-        (db.SHARES / f"{sid}.hdr").write_bytes(data)
     drive = {}  # data/shares is only a short-lived staging area: files move to Drive and the local copy is removed
     try:
         if has_model:
             await run_in_threadpool(_gzip, dest, db.SHARES / f"{sid}.glb.gz")
-        for key, fname in (("glbz", f"{sid}.glb.gz"), ("hdr", f"{sid}.hdr"), ("pack", f"{sid}.pack")):
+        for key, fname in (("glbz", f"{sid}.glb.gz"), ("pack", f"{sid}.pack")):
             p = db.SHARES / fname
             if p.exists():
                 drive[key] = await run_in_threadpool(storage.upload, lid, p, fname)
@@ -319,16 +307,12 @@ async def share(request: Request, model: UploadFile | None = File(None), config:
             raise HTTPException(409, "Connect your Google Drive first (Drive button in the top bar).")
         raise HTTPException(502, "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive.")
     finally:
-        for ext in ("glb", "glb.gz", "hdr", "pack"):
+        for ext in ("glb", "glb.gz", "pack"):
             (db.SHARES / f"{sid}.{ext}").unlink(missing_ok=True)
     exp = int(time.time() + expires_in_days * 86400) if expires_in_days else None
     pw = db.hash_pw(password) if password else None
-    # image links can only offer the original GLB (other formats are made in the 3D viewer, which they never load)
-    fmts = json.dumps((["glb"] if "glb" in tier["formats"] else []) if kind == "images" and allow_download else tier["formats"] if allow_download else [])
-    mode, text = im["watermark"], watermark.strip()
-    wm = {"text": "Scic3DViewer", "tile": True, "cross": True} if mode == "forced" else \
-         {"text": text, "tile": False, "cross": False} if mode == "custom" and text else None  # chosen here, never by the browser
-    vals = (title, json.dumps(cfg), *map(int, flags.values()), fmts, json.dumps(drive), exp, pw, kind, json.dumps(wm) if wm else None)
+    fmts = json.dumps((["glb"] if "glb" in tier["formats"] else []) if allow_download else [])  # only the original GLB can be offered
+    vals = (title, json.dumps(cfg), int(allow_download), 0, 0, fmts, json.dumps(drive), exp, pw, kind, json.dumps(wm) if wm else None)
     with db.connect() as c:
         if old:
             c.execute("UPDATE shares SET title=?,config=?,allow_download=?,allow_measure=?,allow_explode=?,formats=?,"
@@ -418,13 +402,19 @@ def _gunzip(chunks):
         yield out
 
 
-def serve(r, ext: str, mime: str):
+def serve(r, ext: str, mime: str, request: Request | None = None):
     ids = json.loads(r["drive_ids"] or "{}")
     fid = ids.get("glbz") if ext == "glb" else None
     zipped = bool(fid)
     fid = fid or ids.get(ext)  # shares made before compression keep a plain "glb" entry
     if not fid:
         raise HTTPException(404)
+    cache = {}
+    if request is not None:  # visitors: the browser keeps the file but asks first, so revoked or expired links still stop at once,
+        etag = '"' + hashlib.sha1(f"{ext}:{fid}".encode()).hexdigest()[:20] + '"'  # and an unchanged file is never re-sent or re-read from Drive
+        cache = {"ETag": etag, "Cache-Control": "private, no-cache"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=cache)
     gen = storage.stream(r["license_id"], fid)  # the owner's own Drive; fetch the first chunk now so failures return a clean error
     if zipped:
         gen = _gunzip(gen)
@@ -432,16 +422,16 @@ def serve(r, ext: str, mime: str):
         first = next(gen, b"")
     except Exception:
         raise HTTPException(502, "This model is temporarily unavailable")
-    return StreamingResponse(itertools.chain([first], gen), media_type=mime)
+    return StreamingResponse(itertools.chain([first], gen), media_type=mime, headers=cache)
 
 
 @app.get("/api/projects/{share_id}/model")
 def share_model(share_id: str, request: Request):
     r = get_share(share_id)
     check_access(r, request)
-    if r["kind"] == "images" and not r["allow_download"]:
-        raise HTTPException(404)  # image links never send the 3D model unless the owner allowed downloads
-    return serve(r, "glb", "model/gltf-binary")
+    if not r["allow_download"]:
+        raise HTTPException(404)  # the model is only served when the owner allowed downloads
+    return serve(r, "glb", "model/gltf-binary", request)
 
 
 @app.get("/api/projects/{share_id}/images")
@@ -450,14 +440,7 @@ def share_images(share_id: str, request: Request):
     check_access(r, request)
     if r["kind"] != "images":
         raise HTTPException(404)
-    return serve(r, "pack", "application/octet-stream")
-
-
-@app.get("/api/projects/{share_id}/hdr")
-def share_hdr(share_id: str, request: Request):
-    r = get_share(share_id)
-    check_access(r, request)
-    return serve(r, "hdr", "application/octet-stream")
+    return serve(r, "pack", "application/octet-stream", request)
 
 
 def remove_share(r):
@@ -471,6 +454,115 @@ def remove_share(r):
 @app.delete("/api/projects/{share_id}")
 def delete_share(share_id: str, u=Depends(current_user)):
     remove_share(owned_share(share_id, u))
+    return {"ok": True}
+
+
+# ---------- saved projects (Studio "Save to Google Drive") ----------
+class ProjectName(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
+def owned_project(pid: str, u):
+    if not ID_RE.match(pid):
+        raise HTTPException(404, "Project not found")
+    with db.connect() as c:
+        r = c.execute("SELECT * FROM drive_projects WHERE id=?", (pid,)).fetchone()
+    if not r or r["license_id"] not in db.license_ids(u["email"]):
+        raise HTTPException(404, "Project not found")  # 404 for other people's projects too, so ids cannot be probed
+    return r
+
+
+@app.post("/api/drive-projects")
+async def save_project(request: Request, model: UploadFile = File(...), config: str = Form("{}"), name: str = Form("Untitled", max_length=80),
+                       thumb: str = Form("", max_length=60000), project_id: str = Form(""), u=Depends(current_user)):
+    rate_limit(request, "save", 30)
+    lid = u["license_id"]
+    if not storage.connected(lid):
+        raise HTTPException(409, "Connect your Google Drive first (Drive menu).")
+    tier = db.TIERS[u["tier"]]
+    old = owned_project(project_id, u) if project_id else None
+    if not old and db.projects_count(u["email"]) >= tier["max_projects"]:
+        raise HTTPException(403, f"Project limit reached: the {u['tier']} tier keeps {tier['max_projects']} saved projects. Delete one first.")
+    if len(config) > 256 * 1024:
+        raise HTTPException(413, "scene config too large")
+    try:
+        assert isinstance(json.loads(config), dict)
+    except Exception:
+        raise HTTPException(400, "config must be a JSON object")
+    if thumb and not thumb.startswith("data:image/"):
+        raise HTTPException(400, "bad thumbnail")
+    if await model.read(4) != b"glTF":
+        raise HTTPException(400, "Model must be a binary .glb")
+    await model.seek(0)
+    pid = old["id"] if old else secrets.token_urlsafe(9)
+    dest, zdest, size = db.SHARES / f"p{pid}.glb", db.SHARES / f"p{pid}.glb.gz", 0
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await model.read(db.MB):
+                size += len(chunk)
+                if size > tier["max_mb"] * db.MB:
+                    raise HTTPException(413, f"{u['tier']} tier limit is {tier['max_mb']} MB")
+                f.write(chunk)
+        await run_in_threadpool(_gzip, dest, zdest)
+        fid = await run_in_threadpool(storage.upload, lid, zdest, f"{pid}.glb.gz")
+    except HTTPException:
+        raise
+    except PermissionError:
+        raise HTTPException(409, "Connect your Google Drive first (Drive menu).")
+    except Exception:
+        raise HTTPException(502, "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive.")
+    finally:
+        dest.unlink(missing_ok=True)
+        zdest.unlink(missing_ok=True)
+    now, name = int(time.time()), name.strip() or "Untitled"
+    with db.connect() as c:
+        if old:
+            c.execute("UPDATE drive_projects SET license_id=?,name=?,config=?,drive_id=?,size=?,thumb=?,updated_at=? WHERE id=?",
+                      (lid, name, config, fid, size, thumb, now, pid))
+        else:
+            c.execute("INSERT INTO drive_projects(id,license_id,name,config,drive_id,size,thumb,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (pid, lid, name, config, fid, size, thumb, now, now))
+    if old:
+        storage.delete(old["license_id"], old["drive_id"])
+    db.log(lid, "project_save", request.client.host, f"{pid} {size}B")
+    return {"id": pid, "name": name, "updated_at": now}
+
+
+@app.get("/api/drive-projects")
+def list_projects(limit: int = 60, offset: int = 0, u=Depends(current_user)):
+    ids = db.license_ids(u["email"]); q = ",".join("?" * len(ids))
+    with db.connect() as c:
+        rows = c.execute(f"SELECT id,name,size,thumb,created_at,updated_at FROM drive_projects WHERE license_id IN ({q}) "
+                         f"ORDER BY updated_at DESC LIMIT ? OFFSET ?", (*ids, max(1, min(limit, 100)), max(0, offset))).fetchall()
+    return {"items": [dict(r) for r in rows], "total": db.projects_count(u["email"]), "max": db.TIERS[u["tier"]]["max_projects"]}
+
+
+@app.get("/api/drive-projects/{pid}")
+def open_project(pid: str, u=Depends(current_user)):
+    r = owned_project(pid, u)
+    return {"id": r["id"], "name": r["name"], "config": json.loads(r["config"] or "{}")}
+
+
+@app.get("/api/drive-projects/{pid}/model")
+def open_project_model(pid: str, u=Depends(current_user)):
+    r = owned_project(pid, u)
+    return serve({"drive_ids": json.dumps({"glbz": r["drive_id"]}), "license_id": r["license_id"]}, "glb", "model/gltf-binary")
+
+
+@app.patch("/api/drive-projects/{pid}")
+def rename_project(pid: str, body: ProjectName, u=Depends(current_user)):
+    owned_project(pid, u)
+    with db.connect() as c:
+        c.execute("UPDATE drive_projects SET name=? WHERE id=?", (body.name.strip() or "Untitled", pid))
+    return {"ok": True}
+
+
+@app.delete("/api/drive-projects/{pid}")
+def delete_project(pid: str, u=Depends(current_user)):
+    r = owned_project(pid, u)
+    with db.connect() as c:
+        c.execute("DELETE FROM drive_projects WHERE id=?", (pid,))
+    storage.delete(r["license_id"], r["drive_id"])
     return {"ok": True}
 
 

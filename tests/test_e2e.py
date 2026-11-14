@@ -60,13 +60,6 @@ def run_wizard(page, title=None, custom=None, download=False):
     return page.input_value("#sUrl")
 
 
-def make_interactive_link(studio):  # the wizard publishes picture links; the 3D link type is still served, so make one through the API
-    return studio.evaluate("""async () => { const fd = new FormData(); fd.append('model', await stage.exportAs('glb'), 'm.glb');
-        fd.append('config', JSON.stringify(stage.getConfig())); fd.append('title', 'Interactive');
-        const r = await fetch('/api/projects/share', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.scic_token }, body: fd });
-        return location.origin + (await r.json()).url; }""")
-
-
 def test_studio_publish_projects_and_viewer(server):
     token = db.login_google("E2E User", "e2e@x.com", "test")[0]
     with sync_playwright() as p:
@@ -87,7 +80,7 @@ def test_studio_publish_projects_and_viewer(server):
         assert "/v/" in url and "iframe" in studio.input_value("#sEmbed")
         assert studio.locator("#tl .tl-dot.done").count() == 5                              # the timeline has moved all the way
 
-        studio.click("#sClose"); studio.click("#projects")
+        studio.click("#sClose"); studio.click("[data-menu=file]"); studio.click("#projects")
         studio.wait_for_selector("#projRows tr", timeout=10000)
         assert "E2E model" in studio.inner_text("#projRows")
 
@@ -160,36 +153,22 @@ def test_admin_edits_pauses_and_deletes_a_license(server):
         browser.close()
 
 
-def test_viewer_parts_panel_starts_closed_and_can_be_opened(server):
-    token = db.login_google("Viewer Owner", "vo@x.com", "test")[0]
+def test_viewer_menu_fits_a_phone_and_stacks_its_options(server):
+    db.create_license("Menu M", "menu@x.com", "ENTERPRISE", "30d")
+    token = db.login_google("Menu M", "menu@x.com", "test")[0]
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
-        studio = browser.new_context(bypass_csp=True).new_page()
-        studio.add_init_script(f"localStorage.setItem('scic_token','{token}')")
-        studio.goto(BASE + "/studio")
-        studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
-        studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
-        studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
-        url = make_interactive_link(studio)
-        for name, ctx in (("desktop", dict(viewport={"width": 1280, "height": 800})),
-                          ("phone", dict(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True))):
-            page = browser.new_context(bypass_csp=True, **ctx).new_page()
-            page.goto(url)
-            page.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
-            shown = lambda: page.evaluate("getComputedStyle(document.querySelector('#panel')).display")
-            fits = page.evaluate("""() => { const s = window.stage, V = s.camera.position.constructor;
-                return [[-1, 0, -1], [1, 0, -1], [-1, 2, 1], [1, 2, 1], [-1, 0, 1], [1, 2, -1]].every(p => { const n = new V(...p).project(s.camera); return Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1; }); }""")
-            assert fits, name                                                  # the whole 2x2x2 cube is on screen, also on a narrow phone
-            assert shown() == "none", name                                     # nothing covers the model at first
-            page.click("#menuBtn")                                              # the options live in a burger menu, stacked under each other
-            box = page.locator("#menu").bounding_box(); vp = page.viewport_size
-            assert box["x"] >= 0 and box["x"] + box["width"] <= vp["width"] and box["y"] + box["height"] <= vp["height"], name   # fully on screen
-            ys = [page.locator(f"#menu {sel}").bounding_box() for sel in ("#rotate", "#full", "#panelBtn") if page.locator(f"#menu {sel}").is_visible()]
-            assert len(ys) >= 2 and all(b["y"] > a["y"] and abs(b["x"] - a["x"]) < 2 for a, b in zip(ys, ys[1:])), name        # one under the other
-            page.click("#panelBtn"); assert shown() != "none", name            # the Parts option opens the panel (and closes the menu)
-            assert page.locator("#menu").is_hidden(), name
-            page.click("#panelClose"); assert shown() == "none", name          # the X closes it again
-            page.click("#menuBtn"); page.click("#panelBtn"); page.click("#menuBtn"); page.click("#panelBtn"); assert shown() == "none", name   # and the option toggles
+        url = publish_images(browser, token, SMALL)
+        page = browser.new_context(bypass_csp=True, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page()
+        page.goto(url)
+        page.wait_for_function("document.querySelector('#stage canvas')?.dataset.frame !== undefined", timeout=30000)
+        page.click("#menuBtn")                                                            # the options live in a burger menu, stacked under each other
+        box = page.locator("#menu").bounding_box(); vp = page.viewport_size
+        assert box["x"] >= 0 and box["x"] + box["width"] <= vp["width"] and box["y"] + box["height"] <= vp["height"]   # fully on screen
+        ys = [page.locator(f"#menu {sel}").bounding_box() for sel in ("button:has-text('Front')", "button:has-text('Side')", "#rotate", "#full") if page.locator(f"#menu {sel}").is_visible()]
+        assert len(ys) >= 3 and all(b["y"] > a["y"] and abs(b["x"] - a["x"]) < 2 for a, b in zip(ys, ys[1:]))       # one under the other
+        page.keyboard.press("Escape"); assert page.locator("#menu").is_hidden()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         browser.close()
 
 
@@ -262,7 +241,6 @@ def test_image_link_viewer_has_no_3d_and_rotates_with_the_mouse(server):
         assert any("/images" in u for u in reqs)
         assert not any("/model" in u or "three" in u or "stage.js" in u for u in reqs), reqs   # no model, no 3D engine
         assert viewer.evaluate("typeof window.stage?.exportAs") == "undefined"          # (window.stage is just the #stage div here)
-        assert viewer.evaluate("getComputedStyle(document.querySelector('#panelBtn')).display") == "none"
         viewer.mouse.move(300, 350); viewer.mouse.down(); viewer.mouse.move(600, 350, steps=12); viewer.mouse.up()
         viewer.wait_for_timeout(900)
         assert shot() != before                                                          # dragging shows other pictures
@@ -305,10 +283,16 @@ def test_image_link_callouts_toggle_and_a_click_turns_to_the_tag(server):
         viewer = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page()
         viewer.goto(url)
         viewer.wait_for_selector(".callout:not([hidden])", timeout=30000)
-        viewer.click("#menuBtn"); viewer.click("button:has-text('Callouts')")             # viewers can hide the tags
+        tour = viewer.locator("[aria-label='Callout tour']")
+        assert tour.is_visible()                                                          # tour buttons exist when there are callouts
+        tour.get_by_role("button", name="Next callout").click()
+        assert "1/1" in tour.inner_text()
+        viewer.click("#menuBtn"); viewer.click("button:has-text('Callouts')")             # viewers can hide the tags...
         viewer.wait_for_selector(".callout", state="hidden", timeout=5000)
+        assert tour.is_hidden()                                                           # ...and the tour buttons go with them
         viewer.click("#menuBtn"); viewer.click("button:has-text('Callouts')")
         viewer.wait_for_selector(".callout", state="visible", timeout=5000)
+        assert tour.is_visible()
         viewer.click(".callout")                                                          # turns to the picture where the tag faces us
         viewer.wait_for_timeout(1200)
         box = viewer.locator(".callout").bounding_box(); cv = viewer.locator("#stage canvas").bounding_box()
@@ -385,7 +369,114 @@ def test_z_up_files_stand_upright_and_the_button_fixes_other_files(server):
         page.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
         dx, dy, dz, floor = size()
         assert dy > dx * 1.5 and dy > dz * 1.5 and abs(floor) < 1e-3, (dx, dy, dz, floor)
-        page.click("#zup")                                                               # for other formats: one click lays it down again (Z becomes Y)
+        page.click("[data-menu=model]"); page.click("#zup")                              # for other formats: one click lays it down again (Z becomes Y)
         dx, dy, dz, floor = size()
         assert dz > dy * 1.5 and abs(floor) < 1e-3, (dx, dy, dz, floor)
+        browser.close()
+
+
+def open_studio(browser, email, tier="ENTERPRISE", viewport=None, mobile=False):
+    if tier != "FREE":
+        db.create_license("Tester", email, tier, "30d")
+    token = db.login_google("Tester", email, "test")[0]
+    page = browser.new_context(bypass_csp=True, viewport=viewport or {"width": 1280, "height": 800}, is_mobile=mobile, has_touch=mobile).new_page()
+    page.add_init_script(f"localStorage.setItem('scic_token','{token}')")
+    page.goto(BASE + "/studio")
+    page.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
+    page.set_input_files("#file", {"name": "post.stl", "mimeType": "model/stl", "buffer": stl_box(1, 1, 3).encode()})
+    page.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
+    return page
+
+
+def test_callouts_follow_their_part_and_undo_redo_work(server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = open_studio(browser, "follow@x.com")
+        # a callout on the front of the post (as a click on the model would make it)
+        page.evaluate("""() => { const V = stage.camera.position.constructor, m = stage.meshesAll()[0]; stage.ask = () => 'Top';
+            stage._annotateAt({ point: new V(0, 1, 1), face: { normal: new V(0, 0, 1) }, object: m }); }""")
+        a0 = page.evaluate("stage.annotations[0]")
+        assert a0["part"] and a0["lp"] and len(a0["lcam"]) == 3                           # stored relative to its part
+        page.evaluate("stage.assembly.children[0].position.x += 0.7")                    # move the part: the callout follows it
+        page.wait_for_function("stage.annotations[0].point[0] > %s + 0.69" % a0["point"][0], timeout=5000)
+        page.evaluate("stage.assembly.children[0].rotation.x += Math.PI / 2")             # and turns with it (its normal pointed up, now it points at the camera)
+        page.wait_for_function("Math.abs(stage.annotations[0].normal[2]) > 0.9", timeout=5000)
+        cfg = page.evaluate("stage.getConfig().annotations[0]")
+        assert cfg["part"] == a0["part"] and abs(cfg["normal"][2]) > 0.9                  # the saved scene has the moved values
+        # callouts from older projects get attached to the nearest part when a scene is applied
+        page.evaluate("stage.applyConfig({ annotations: [{ text: 'old', point: [0, 1, 1], normal: [0, 0, 1], cam: [1, 1, 3], target: [0, 1, 0] }] })")
+        assert page.evaluate("!!stage.annotations[0].part")
+        # undo / redo
+        page.evaluate("stage.history = []; stage.redoStack = []; stage.annotations = []; stage.buildAnnos()")
+        page.evaluate("""() => { const V = stage.camera.position.constructor; stage.ask = () => 'One';
+            stage._annotateAt({ point: new V(0, 1, 1), face: { normal: new V(0, 0, 1) }, object: stage.meshesAll()[0] }); }""")
+        assert page.evaluate("stage.annotations.length") == 1
+        page.keyboard.press("Control+z"); assert page.evaluate("stage.annotations.length") == 0
+        page.keyboard.press("Control+Shift+z"); assert page.evaluate("stage.annotations.length") == 1
+        page.click("[data-menu=edit]"); assert page.locator("#mUndo").is_enabled(); page.click("#mUndo")
+        assert page.evaluate("stage.annotations.length") == 0
+        browser.close()
+
+
+def test_rotation_snapping(server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = open_studio(browser, "snap@x.com")
+        snap = lambda: page.evaluate("stage.tc.rotationSnap")
+        assert snap() is None                                                             # off by default
+        page.click("#snapBtn"); assert abs(snap() - 3.14159265 / 12) < 1e-4               # 15 degrees
+        assert page.evaluate("stage.tc.translationSnap") == 0.1
+        page.select_option("#snapDeg", "45"); assert abs(snap() - 3.14159265 / 4) < 1e-4
+        page.keyboard.press("s"); assert snap() is None                                   # S toggles it
+        page.click("[data-menu=edit]"); page.click("#mSnap"); assert abs(snap() - 3.14159265 / 4) < 1e-4
+        assert page.locator("#snapBtn").get_attribute("aria-pressed") == "true"
+        browser.close()
+
+
+def test_save_and_open_a_project_in_google_drive(server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = open_studio(browser, "saver@x.com")
+        assert "Unsaved" in page.inner_text("#saveState") and page.locator("#saveDot").is_visible()
+        assert "0/" in page.inner_text("#quota") and "projects" in page.inner_text("#quota")
+        page.click("[data-menu=file]"); page.click("#mSave")                              # first save asks for a name
+        page.fill("#saveName", "My bracket"); page.click("#saveGo")
+        page.wait_for_function("document.querySelector('#saveState').textContent.includes('Saved')", timeout=30000)
+        assert "My bracket" in page.inner_text("#saveState") and page.locator("#saveDot").is_hidden()
+        assert "1/" in page.inner_text("#quota")
+        page.evaluate("document.querySelector('#light').value = 1.4; document.querySelector('#light').dispatchEvent(new Event('input', { bubbles: true }))")
+        assert "Unsaved" in page.inner_text("#saveState")                                 # a change marks the project as unsaved
+        page.keyboard.press("Control+s")                                                  # Ctrl+S saves over it, no dialog
+        page.wait_for_function("document.querySelector('#saveState').textContent.includes('Saved')", timeout=30000)
+        assert page.locator("#saveModal").is_hidden()
+        page.click("[data-menu=file]"); page.click("#mOpenDrive")                         # open it again from Drive
+        page.wait_for_selector("#openGrid .pcard", timeout=10000)
+        assert "My bracket" in page.inner_text("#openGrid") and "1 of" in page.inner_text("#openCount")
+        page.evaluate("stage.assembly.clear(); stage.emit('tree')")
+        page.locator("#openGrid .pcard").get_by_role("button", name="Open").click()
+        page.wait_for_function("stage.triCount() === 12", timeout=30000)                  # the model came back from Drive
+        assert "Saved" in page.inner_text("#saveState") and page.locator("#saveDot").is_hidden()
+        page.click("[data-menu=file]"); page.click("#mOpenDrive"); page.wait_for_selector("#openGrid .pcard")
+        page.once("dialog", lambda d: d.accept())
+        page.locator("#openGrid .pcard").get_by_role("button", name="Delete").click()
+        page.wait_for_function("document.querySelector('#openGrid').children.length === 0", timeout=10000)
+        browser.close()
+
+
+def test_menus_work_with_the_keyboard_and_dialogs_are_labelled(server):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = open_studio(browser, "keys@x.com")
+        page.focus("[data-menu=file]"); page.keyboard.press("ArrowDown")
+        assert page.evaluate("document.activeElement.id") == "open"                       # the first item has focus
+        page.keyboard.press("ArrowRight"); assert page.evaluate("document.activeElement.id") == "mUndo" or page.locator("#menu-edit").is_visible()
+        page.keyboard.press("Escape"); assert page.locator("#menu-edit").is_hidden()
+        assert page.locator("#shareModal").get_attribute("role") == "dialog" and page.locator("#shareModal").get_attribute("aria-modal") == "true"
+        assert page.locator("#shareModal").get_attribute("aria-labelledby")
+        page.click("#share"); page.keyboard.press("Escape"); assert page.locator("#shareModal").is_hidden()   # Escape closes dialogs
+        page.evaluate("document.activeElement.blur()")
+        page.keyboard.press("?"); assert page.locator("#helpModal").is_visible()
+        page.click("#helpClose")
+        for label in ("Select", "Move", "Rotate", "Scale", "Snap", "Brush", "Callout"):
+            assert page.locator(f"#tools [aria-label='{label}']").count() == 1             # icon buttons all have names
         browser.close()

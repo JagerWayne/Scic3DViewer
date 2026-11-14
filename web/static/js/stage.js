@@ -78,7 +78,16 @@ export class Stage extends EventTarget {
     this.tc = new TransformControls(this.camera, r.domElement); this.tc.visible = false; this.scene.add(this.tc);
     this.tc.addEventListener('dragging-changed', e => {
       this.controls.enabled = !e.value; this._noSelectUntil = performance.now() + 250;
-      if (e.value) { this.setExplode(0); this.emit('explode-reset'); } else this._clearP0();
+      const o = this.tc.object;
+      if (e.value) { this.setExplode(0); this.emit('explode-reset'); this._xf0 = o && { o, p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() }; }
+      else {
+        this._clearP0(); const x = this._xf0; this._xf0 = null;
+        if (x && (!x.p.equals(x.o.position) || !x.q.equals(x.o.quaternion) || !x.s.equals(x.o.scale))) { // one undo step per drag
+          const a = { p: x.o.position.clone(), q: x.o.quaternion.clone(), s: x.o.scale.clone() };
+          const set = v => { x.o.position.copy(v.p); x.o.quaternion.copy(v.q); x.o.scale.copy(v.s); this._clearP0(); };
+          this.record({ undo: () => set(x), redo: () => set(a) });
+        }
+      }
     });
     this.tc.addEventListener('change', () => this.emit('change'));
 
@@ -86,7 +95,7 @@ export class Stage extends EventTarget {
     this.clipPlane = new THREE.Plane(new V3(0, 0, -1), 0);
     this.mode = 'select'; this.tool = 'brush'; this.mtype = 'ruler';
     this.brushR = .12; this.paintColor = new THREE.Color('#ef4444'); this.fillAngle = 30;
-    this.undoStack = []; this.selectable = true; this.gizmo = false; this.maxAnnotations = null;
+    this.history = []; this.redoStack = []; this.snap = { on: false, deg: 15 }; this.canPaintUndo = true; this.selectable = true; this.gizmo = false; this.maxAnnotations = null;
     this.ask = m => window.prompt(m, '');
     this.ray = new THREE.Raycaster(); this._ndc = new THREE.Vector2();
     this.labels = []; this.annotations = []; this.annoLabels = []; this.dims = [];
@@ -298,7 +307,7 @@ export class Stage extends EventTarget {
   }
   mergeAll() {
     const ms = this.meshes(); if (!ms.length) return;
-    this.unsolo(); this.setExplode(0); this.select(null); this.assembly.updateMatrixWorld(true);
+    this.unsolo(); this.setExplode(0); this.select(null); this.assembly.updateMatrixWorld(true); this._follow(true);
     const keep = ['position', 'normal', 'color'], gs = ms.map(m => {
       let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
       Object.keys(g.attributes).forEach(k => keep.includes(k) || g.deleteAttribute(k));
@@ -310,7 +319,8 @@ export class Stage extends EventTarget {
     });
     const mesh = new THREE.Mesh(BGU.mergeGeometries(gs, false), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .6 }));
     const part = new THREE.Group(); part.name = 'Merged'; part.add(mesh);
-    this.assembly.clear(); this.assembly.add(part); this._clearP0(); this._applyAll(); this.emit('tree'); this.emit('change');
+    this.assembly.clear(); this.assembly.add(part); this._clearP0(); this._applyAll(); part.updateWorldMatrix(true, false);
+    this.annotations.forEach(a => this._anchor(a, part)); this.emit('tree'); this.emit('change');
   }
 
   // ---------- exploded view ----------
@@ -352,10 +362,27 @@ export class Stage extends EventTarget {
     }
     col.needsUpdate = true;
   }
-  _pushUndo(map) { if (map.size) { this.undoStack.push(map); if (this.undoStack.length > 30) this.undoStack.shift(); this.emit('undo'); } }
+  // ---------- undo / redo: one history for moves, callouts and paint ----------
+  record(e) { this.history.push(e); if (this.history.length > 60) this.history.shift(); this.redoStack = []; this.emit('history'); }
   undo() {
-    const e = this.undoStack.pop(); if (!e) return;
-    e.forEach((arr, m) => { m.geometry.attributes.color.array.set(arr); m.geometry.attributes.color.needsUpdate = true; }); this.emit('undo');
+    const e = this.history.pop(); if (!e) return false;
+    if (e.paint && !this.canPaintUndo) { this.history.push(e); this.emit('locked', 'paint_undo'); return false; }
+    e.undo(); this.redoStack.push(e); this.emit('history'); this.emit('change'); return true;
+  }
+  redo() {
+    const e = this.redoStack.pop(); if (!e) return false;
+    e.redo(); this.history.push(e); this.emit('history'); this.emit('change'); return true;
+  }
+  _pushUndo(before) { // paint: `before` maps mesh -> colours before the stroke; the colours now are the "after"
+    if (!before.size) return;
+    const after = new Map(); before.forEach((_, m) => after.set(m, m.geometry.attributes.color.array.slice()));
+    const put = map => map.forEach((arr, m) => { m.geometry.attributes.color.array.set(arr); m.geometry.attributes.color.needsUpdate = true; });
+    this.record({ paint: true, undo: () => put(before), redo: () => put(after) });
+  }
+  setSnap(on, deg = this.snap.deg) { // rotation in degrees; moves and scale snap to 0.1 units
+    this.snap = { on, deg };
+    this.tc.setRotationSnap(on ? THREE.MathUtils.degToRad(deg) : null); this.tc.setTranslationSnap(on ? .1 : null); this.tc.setScaleSnap(on ? .1 : null);
+    this.emit('snap');
   }
   resetColors() {
     const e = new Map();
@@ -512,13 +539,47 @@ export class Stage extends EventTarget {
     if (this.maxAnnotations !== null && this.annotations.length >= this.maxAnnotations) { this.emit('locked', 'annotations'); return; }
     const text = this.ask('Callout text:'); if (text === null || !text.trim()) return;
     const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
-    this.annotations.push({ text: text.trim().slice(0, 120), point: h.point.toArray(), normal: n.toArray(), cam: this.camera.position.toArray(), target: this.controls.target.toArray() });
-    this.buildAnnos(); this.emit('annos');
+    const a = { text: text.trim().slice(0, 120), point: h.point.toArray(), normal: n.toArray(), cam: this.camera.position.toArray(), target: this.controls.target.toArray() };
+    this._anchor(a, this.topPart(h.object)); this.annotations.push(a); this.buildAnnos(); this.emit('annos');
+    this.record({ undo: () => { this.annotations.splice(this.annotations.indexOf(a), 1); this.unpin(); this.buildAnnos(); this.emit('annos'); },
+                  redo: () => { this.annotations.push(a); this.buildAnnos(); this.emit('annos'); } });
   }
-  removeAnno(i) { this.annotations.splice(i, 1); this.unpin(); this.buildAnnos(); this.emit('annos'); }
+  removeAnno(i) {
+    const [a] = this.annotations.splice(i, 1); this.unpin(); this.buildAnnos(); this.emit('annos');
+    if (a) this.record({ undo: () => { this.annotations.splice(i, 0, a); this.buildAnnos(); this.emit('annos'); }, redo: () => { this.annotations.splice(this.annotations.indexOf(a), 1); this.buildAnnos(); this.emit('annos'); } });
+  }
+  // A callout is stored relative to the part it sits on (`part` id, `lp`/`ln`/`lcam`/`ltgt` in the space of that part), and the world values
+  // (point, normal, cam, target) are recomputed whenever the part moves: with the gizmo, exploded view, merge or the Z-up fix.
+  _sid(part) { return (part.userData.sid ??= Math.random().toString(36).slice(2, 10)); } // survives the GLB export as a node extra
+  _partById(id) { return id ? this.assembly.children.find(c => c.userData.sid === id) : null; }
+  _anchor(a, part) {
+    part.updateWorldMatrix(true, false); const inv = part.matrixWorld.clone().invert();
+    Object.assign(a, { part: this._sid(part), lp: new V3(...a.point).applyMatrix4(inv).toArray(), ln: new V3(...a.normal).transformDirection(inv).toArray(),
+      lcam: new V3(...a.cam).applyMatrix4(inv).toArray(), ltgt: new V3(...a.target).applyMatrix4(inv).toArray() });
+  }
+  _anchorLegacy() { // callouts saved before anchoring existed: attach each to the nearest part
+    this.annotations.forEach(a => {
+      if (!a.point || this._partById(a.part)) return;
+      const p = new V3(...a.point); let best = null, bd = Infinity;
+      this.assembly.children.forEach(c => { const d = new THREE.Box3().setFromObject(c).distanceToPoint(p); if (d < bd) { bd = d; best = c; } });
+      if (best) this._anchor(a, best);
+    });
+  }
+  _follow(force) {
+    this._annoM ??= [];
+    this.annotations.forEach((a, i) => {
+      const part = this._partById(a.part); if (!part || !a.lp) return;
+      part.updateWorldMatrix(true, false); const m = part.matrixWorld;
+      if (!force && this._annoM[i]?.equals(m)) return;
+      this._annoM[i] = m.clone();
+      const p = new V3(...a.lp).applyMatrix4(m), nrm = new V3(...a.ln).transformDirection(m);
+      a.point = p.toArray(); a.normal = nrm.toArray(); a.cam = new V3(...a.lcam).applyMatrix4(m).toArray(); a.target = new V3(...a.ltgt).applyMatrix4(m).toArray();
+      const v = this._annoVis?.[i]; if (v) { const c = p.clone().addScaledVector(nrm, this._annoS * .12); v.dot.position.copy(p); v.line.geometry.setFromPoints([p, c]); v.label.pos.copy(c); }
+    });
+  }
   buildAnnos() {
     this.annoGroup.clear(); this.annoLabels.forEach(l => this._unlabel(l)); this.annoLabels = [];
-    const s = this.size();
+    const s = this._annoS = this.size(); this._annoVis = []; this._annoM = [];
     this.annotations.forEach((a, i) => {
       const p = new V3(...a.point), c = p.clone().addScaledVector(new V3(...a.normal), s * .12);
       const dot = new THREE.Mesh(new THREE.SphereGeometry(s * .012, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false }));
@@ -529,7 +590,7 @@ export class Stage extends EventTarget {
       l.el.onmouseenter = () => this.spot(i);
       l.el.onmouseleave = () => this.spot(this.pinned);
       l.el.onclick = () => this.focusAnno(i);
-      this.annoLabels.push(l);
+      this.annoLabels.push(l); this._annoVis.push({ dot, line, label: l });
     });
     this.annoGroup.visible = this._annoOn !== false; this.annoLabels.forEach(l => (l.hidden = this._annoOn === false));
   }
@@ -644,6 +705,7 @@ export class Stage extends EventTarget {
   async renderTurntable({ az, el, elMin, elMax, px, quality, onProgress, cancelled }) {
     const box = new THREE.Box3().setFromObject(this.assembly).union(new THREE.Box3().setFromObject(this.base));
     if (box.isEmpty()) throw new Error('Nothing to render');
+    this._follow(true);
     const r = this.renderer, cam = this.camera, tgt = this.controls.target;
     const keep = { pos: cam.position.clone(), tgt: tgt.clone(), near: cam.near, far: cam.far, pr: r.getPixelRatio() };
     const c = box.getCenter(new V3()), dist = box.getSize(new V3()).length() / 2 / Math.sin(cam.fov * Math.PI / 360) * 1.08;
@@ -687,7 +749,7 @@ export class Stage extends EventTarget {
     return { blobs, thumbs, anno, mime, w: px, h: px, az, el, elevs };
   }
   getConfig() {
-    const s = this.state;
+    this._follow(true); const s = this.state;
     return {
       camera: { pos: this.camera.position.toArray(), target: this.controls.target.toArray() },
       light: s.light, lightPreset: this.preset, shadows: this.floor.visible, backdrop: s.backdrop, grid: this.grid.visible,
@@ -704,7 +766,7 @@ export class Stage extends EventTarget {
     if (c.material) this.setMaterial(c.material.rough, c.material.metal);
     if (c.env && c.env.preset !== 'custom') this.setEnv(c.env.preset, c.env.intensity); else if (c.env) this.state.envI = c.env.intensity;
     if (c.units) this.setUnit(c.units.unit, c.units.scale);
-    this.annotations = Array.isArray(c.annotations) ? c.annotations : []; this.buildAnnos();
+    this.annotations = Array.isArray(c.annotations) ? c.annotations : []; this._anchorLegacy(); this.buildAnnos(); this._follow(true);
     if (c.camera) { this.camera.position.set(...c.camera.pos); this.controls.target.set(...c.camera.target); this.controls.update(); }
     this.emit('config');
   }
@@ -722,6 +784,7 @@ export class Stage extends EventTarget {
     this.lights.forEach(l => (l.intensity = l.userData.base * this.state.light * this.dim));
     this.floor.position.y = this.grid.position.y + .002;
     if (this.selected) this.selBox.setFromObject(this.selected);
+    if (this.annotations.length) this._follow();
     this.controls.update(); this._updateLabels();
     this.renderer.render(this.scene, this.camera);
   }

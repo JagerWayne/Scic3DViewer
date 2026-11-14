@@ -11,14 +11,14 @@ ADMIN_EMAIL = os.environ.get("SCIC_ADMIN_EMAIL", "waynescicluna.1985@gmail.com")
 
 # Server-side tier table: the single source of truth, also sent to the UI via /api/me.
 TIERS = {
-    "FREE": dict(max_mb=15, max_shares_month=30, max_annotations=2, share_permissions=False, formats=[],
+    "FREE": dict(max_mb=15, max_shares_month=30, max_projects=10, max_annotations=2, share_permissions=False, formats=[],
                  tools=["paint_basic"],
                  images=dict(presets=["light"], custom=False, watermark="forced", max_az=36, max_el=3, max_px=800, max_mb=12)),
-    "PRO": dict(max_mb=100, max_shares_month=150, max_annotations=None, share_permissions=True, formats=["glb"],
+    "PRO": dict(max_mb=100, max_shares_month=150, max_projects=100, max_annotations=None, share_permissions=True, formats=["glb"],
                 tools=["paint_basic", "paint_fill", "assembly", "tour", "slicer", "explode",
                        "decimate", "base", "hdri", "capture"],
                 images=dict(presets=["light", "standard"], custom=False, watermark="none", max_az=72, max_el=5, max_px=1024, max_mb=60)),
-    "ENTERPRISE": dict(max_mb=500, max_shares_month=5000, max_annotations=None, share_permissions=True,
+    "ENTERPRISE": dict(max_mb=500, max_shares_month=5000, max_projects=1000, max_annotations=None, share_permissions=True,
                        formats=["glb", "obj", "stl", "usdz"],
                        tools=["paint_basic", "paint_fill", "paint_undo", "assembly", "tour",
                               "slicer", "explode", "measure", "decimate", "base", "hdri", "capture", "cad_import"],
@@ -55,7 +55,16 @@ def init():
           license_id INTEGER PRIMARY KEY, token_enc TEXT NOT NULL, connected_at INTEGER);
         CREATE TABLE IF NOT EXISTS activity(
           id INTEGER PRIMARY KEY, ts INTEGER, license_id INTEGER, action TEXT, ip TEXT, detail TEXT);
+        CREATE TABLE IF NOT EXISTS rate_hits(bucket TEXT, ip TEXT, ts REAL);
+        CREATE INDEX IF NOT EXISTS rate_hits_k ON rate_hits(bucket, ip, ts);
+        CREATE TABLE IF NOT EXISTS oauth_pending(
+          state TEXT PRIMARY KEY, purpose TEXT, license_id INTEGER, verifier TEXT, expires REAL);
+        CREATE TABLE IF NOT EXISTS drive_projects(
+          id TEXT PRIMARY KEY, license_id INTEGER NOT NULL, name TEXT, config TEXT, drive_id TEXT,
+          size INTEGER, thumb TEXT, created_at INTEGER, updated_at INTEGER);
         """)
+        c.execute("DELETE FROM rate_hits WHERE ts<?", (time.time() - 3600,))  # counters live in SQLite so several server workers share them
+        c.execute("DELETE FROM oauth_pending WHERE expires<?", (time.time(),))
         lhave = {r[1] for r in c.execute("PRAGMA table_info(licenses)")}
         for col, typ in (("paused_at", "INTEGER"), ("note", "TEXT")):  # paused: access off, clock frozen; note: admin-only memo
             if col not in lhave:
@@ -86,8 +95,8 @@ def delete_license(lid: int):
         if not r:
             return False
         free = c.execute("SELECT id FROM licenses WHERE email=? AND duration_days IS NULL", (r["email"],)).fetchone()
-        has_data = c.execute("SELECT (SELECT COUNT(*) FROM shares WHERE license_id=?) + (SELECT COUNT(*) FROM drive_tokens WHERE license_id=?)",
-                             (lid, lid)).fetchone()[0]
+        has_data = c.execute("SELECT (SELECT COUNT(*) FROM shares WHERE license_id=?) + (SELECT COUNT(*) FROM drive_tokens WHERE license_id=?)"
+                             " + (SELECT COUNT(*) FROM drive_projects WHERE license_id=?)", (lid, lid, lid)).fetchone()[0]
         if free:
             free = free["id"]
         elif has_data:  # links or a Drive login exist: they move to a Free account instead of disappearing
@@ -96,6 +105,7 @@ def delete_license(lid: int):
             free = c.execute("SELECT last_insert_rowid()").fetchone()[0]
         if free:
             c.execute("UPDATE shares SET license_id=? WHERE license_id=?", (free, lid))
+            c.execute("UPDATE drive_projects SET license_id=? WHERE license_id=?", (free, lid))
             c.execute("INSERT OR IGNORE INTO drive_tokens SELECT ?, token_enc, connected_at FROM drive_tokens WHERE license_id=?", (free, lid))
         c.execute("DELETE FROM drive_tokens WHERE license_id=?", (lid,))
         c.execute("DELETE FROM sessions WHERE license_id=?", (lid,))
@@ -158,6 +168,17 @@ def shares_this_month(email: str) -> int:
     with connect() as c:
         return c.execute(f"SELECT COUNT(*) FROM activity WHERE action='share' AND ts>=? AND license_id IN ({','.join('?' * len(ids))})",
                          (start, *ids)).fetchone()[0]
+
+
+def projects_count(email: str) -> int:
+    ids = license_ids(email)
+    with connect() as c:
+        return c.execute(f"SELECT COUNT(*) FROM drive_projects WHERE license_id IN ({','.join('?' * len(ids))})", ids).fetchone()[0]
+
+
+def clear_rate_limits():  # tests
+    with connect() as c:
+        c.execute("DELETE FROM rate_hits")
 
 
 def log(license_id, action, ip="", detail=""):

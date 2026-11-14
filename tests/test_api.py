@@ -1,7 +1,8 @@
-import gzip, hashlib, hmac, itertools, json, os, tempfile, time
+import gzip, hashlib, hmac, io, itertools, json, os, tempfile, time
 os.environ["SCIC_DATA"] = tempfile.mkdtemp()
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 import app as appmod, billing, db, mailer, storage
 
 c = TestClient(appmod.app)
@@ -13,7 +14,7 @@ GLB = b"glTF" + b"\0" * 100
 
 @pytest.fixture(autouse=True)
 def fake_drive(monkeypatch):  # in-memory per-user "Drive"; every test user counts as connected
-    cloud.clear(); appmod._hits.clear()  # each test starts with fresh rate-limit counters
+    cloud.clear(); db.clear_rate_limits()  # each test starts with fresh rate-limit counters
     monkeypatch.setattr(storage, "configured", lambda: True)
     monkeypatch.setattr(storage, "connected", lambda lid: True)
     def upload(lid, p, name):  # unique ids, like the real Drive
@@ -27,9 +28,41 @@ def login(email):  # what the Google callback does once Google has verified the 
     return {"Authorization": "Bearer " + db.login_google("Ann", email, "test")[0]}
 
 
-def share(h, **flags):
-    return c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)},
-                  data={"config": "{}", **{k: "true" for k in flags}})
+_IMG = {}
+
+
+def _pic(px, fmt, color=(30, 60, 90, 255)):
+    if (px, fmt) not in _IMG:
+        buf = io.BytesIO()
+        im = Image.new("RGBA", (px, px), color)
+        (im if fmt == "WEBP" else im.convert("RGB")).save(buf, fmt)
+        _IMG[(px, fmt)] = buf.getvalue()
+    return _IMG[(px, fmt)]
+
+
+def mkpack(az=4, el=1, px=64, mime="image/webp", anno=None, thumbs=True):
+    fr = _pic(px, "WEBP" if mime == "image/webp" else "JPEG"); n = az * el
+    frames = [[i * len(fr), len(fr)] for i in range(n)]
+    ix = {"v": 1, "mime": mime, "w": px, "h": px, "az": az, "el": el, "elevs": [20] * el, "frames": frames, "anno": anno}
+    data = fr * n
+    if thumbs:
+        tb = _pic(min(px, 32), "WEBP" if mime == "image/webp" else "JPEG")
+        ix["thumbs"] = [[len(data) + i * len(tb), len(tb)] for i in range(n)]
+        data += tb * n
+    head = json.dumps(ix).encode()
+    return b"S3IM" + len(head).to_bytes(4, "little") + head + data
+
+
+def share(h, pack=None, model=False, **flags):  # a picture link; the model is only sent when asked for (or for a download)
+    files = {"pack": ("p.s3im", pack or mkpack())}
+    if model or "allow_download" in flags:
+        files["model"] = ("m.glb", GLB)
+    return c.post("/api/projects/share", headers=h, files=files, data={"config": "{}", **{k: "true" for k in flags}})
+
+
+def share_images(h, pack=None, **data):  # always with the model
+    return c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB), "pack": ("p.s3im", pack or mkpack())},
+                  data={"config": "{}", "kind": "images", **data})
 
 
 def tier(h):
@@ -41,7 +74,7 @@ def test_free_flow_and_gating():
     assert tier(h) == "FREE"
     assert share(h, allow_download=True).status_code == 403   # custom perms need PRO
     sid = share(h).json()["share_id"]
-    assert c.get(f"/api/projects/{sid}/model").content == GLB
+    assert c.get(f"/api/projects/{sid}/model").status_code == 404   # no model download on Free
     assert c.get(f"/api/projects/{sid}/config").json()["allow_download"] is False
 
 
@@ -52,7 +85,6 @@ def test_license_follows_the_google_email():
     me = c.get("/api/me", headers=h).json()
     assert me["tier"] == "PRO" and me["expires_at"]
     assert share(h, allow_download=True).status_code == 200
-    assert share(h, allow_measure=True).status_code == 403         # measure is ENTERPRISE only
     with db.connect() as con:
         con.execute("UPDATE licenses SET expires_at=1 WHERE email='pro@x.com'")
     assert tier(h) == "FREE" and tier(login("pro@x.com")) == "FREE"  # expired -> falls back, also on next sign-in
@@ -60,10 +92,11 @@ def test_license_follows_the_google_email():
 
 
 def test_auth_and_validation():
-    assert c.post("/api/projects/share", files={"model": ("m.glb", GLB)}).status_code == 401
+    assert c.post("/api/projects/share", files={"pack": ("p.s3im", mkpack())}).status_code == 401
     assert c.post("/api/register", json={}).status_code in (404, 405)   # old form login is gone
     h = login("v@x.com")
-    assert c.post("/api/projects/share", headers=h, files={"model": ("m.glb", b"nope")}).status_code == 400
+    assert c.post("/api/projects/share", headers=pro("v2@x.com"), files={"model": ("m.glb", b"nope"), "pack": ("p.s3im", mkpack())}, data={"allow_download": "true"}).status_code == 400
+    assert c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}).status_code == 400   # no pictures
     assert "nonce-" in c.get("/studio").headers["content-security-policy"]
 
 
@@ -71,7 +104,7 @@ def test_drive_only_storage(monkeypatch):
     h = login("drive@x.com")
     sid = share(h).json()["share_id"]
     assert not list(db.SHARES.glob("*")) and cloud                     # nothing stays on local disk
-    assert c.get(f"/api/projects/{sid}/model").content == GLB          # streamed back through the server
+    assert c.get(f"/api/projects/{sid}/images").content.startswith(b"S3IM")  # streamed back through the server
     assert c.delete(f"/api/projects/{sid}", headers=h).status_code == 200 and not cloud
     monkeypatch.setattr(storage, "upload", lambda *a: 1 / 0)           # Drive failing -> error, nothing left behind
     assert share(h).status_code == 502 and not list(db.SHARES.glob("*"))
@@ -198,8 +231,8 @@ def pro(email):
 
 def test_link_password_expiry_revoke():
     h = pro("pro2@x.com")
-    r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)},
-               data={"config": "{}", "password": "secret1", "expires_in_days": "7"})
+    r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB), "pack": ("p.s3im", mkpack())},
+               data={"config": "{}", "password": "secret1", "expires_in_days": "7", "allow_download": "true"})
     assert r.status_code == 200
     sid = r.json()["share_id"]
     assert c.get(f"/api/projects/{sid}/config").status_code == 401
@@ -220,7 +253,7 @@ def test_link_password_expiry_revoke():
 def test_free_cannot_use_link_controls():
     h = login("free3@x.com")
     for extra in ({"password": "secret1"}, {"expires_in_days": "3"}):
-        r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", **extra})
+        r = c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}", **extra})
         assert r.status_code == 403
     sid = share(h).json()["share_id"]
     assert c.patch(f"/api/projects/{sid}", headers=h, json={"password": "secret1"}).status_code == 403
@@ -228,15 +261,15 @@ def test_free_cannot_use_link_controls():
 
 def test_projects_list_update_in_place_and_gzip():
     h = pro("pro3@x.com")
-    sid = share(h).json()["share_id"]
-    assert all(k.split(":")[1].endswith(".glb.gz") for k in cloud)                  # stored compressed in Drive
-    assert gzip.decompress(next(iter(cloud.values()))) == GLB
+    sid = share(h, model=True).json()["share_id"]
+    assert sorted(k.split(":")[1].rsplit(".", 1)[1] for k in cloud) == ["gz", "pack"]  # the model is stored compressed in Drive
+    assert gzip.decompress(next(v for k, v in cloud.items() if ".glb.gz" in k)) == GLB
     assert [p["share_id"] for p in c.get("/api/projects", headers=h).json()] == [sid]
     assert c.get("/api/projects", headers=login("nobody@x.com")).json() == []
     old = set(cloud)
-    r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", "update_id": sid})
-    assert r.json()["share_id"] == sid and len(cloud) == 1 and not (old & set(cloud))  # same address, old file removed
-    assert c.post("/api/projects/share", headers=login("evil@x.com"), files={"model": ("m.glb", GLB)},
+    r = c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}", "update_id": sid})
+    assert r.json()["share_id"] == sid and len(cloud) == 1 and not (old & set(cloud))  # same address, old files removed
+    assert c.post("/api/projects/share", headers=login("evil@x.com"), files={"pack": ("p.s3im", mkpack())},
                   data={"config": "{}", "update_id": sid}).status_code == 403
     assert c.delete(f"/api/projects/{sid}", headers=h).status_code == 200 and c.get("/api/projects", headers=h).json() == []
 
@@ -406,19 +439,6 @@ def test_stripe_webhook_creates_one_license(monkeypatch):
 
 
 # ---------- 360 picture links: visitors get pictures only ----------
-def mkpack(az=4, el=1, px=64, mime="image/webp", anno=None):
-    frames, off = [], 0
-    for _ in range(az * el):
-        frames.append([off, 5]); off += 5
-    ix = json.dumps({"v": 1, "mime": mime, "w": px, "h": px, "az": az, "el": el, "elevs": [20] * el, "frames": frames, "anno": anno}).encode()
-    return b"S3IM" + len(ix).to_bytes(4, "little") + ix + b"12345" * (az * el)
-
-
-def share_images(h, pack=None, **data):
-    return c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB), "pack": ("p.s3im", pack or mkpack())},
-                  data={"config": "{}", "kind": "images", **data})
-
-
 def test_image_link_never_sends_the_model():
     h = pro("img1@x.com")
     sid = share_images(h).json()["share_id"]
@@ -430,8 +450,7 @@ def test_image_link_never_sends_the_model():
     sid2 = share_images(h, allow_download="true").json()["share_id"]
     assert c.get(f"/api/projects/{sid2}/model").content == GLB                       # Pro may offer the model download
     assert c.get(f"/api/projects/{sid2}/config").json()["formats"] == ["glb"]
-    plain = share(h).json()["share_id"]
-    assert c.get(f"/api/projects/{plain}/images").status_code == 404                  # 3D links have no pack
+    assert share_images(h, kind="model").status_code == 400                           # interactive 3D links no longer exist
 
 
 def test_image_links_are_gated_by_tier():
@@ -439,7 +458,7 @@ def test_image_links_are_gated_by_tier():
     r = share_images(free)
     assert r.status_code == 200
     cfg = c.get(f"/api/projects/{r.json()['share_id']}/config").json()
-    assert cfg["watermark"] == {"text": "Scic3DViewer", "tile": True, "cross": True}  # Free: watermark and faint cross, set by the server
+    assert cfg["watermark"] == {"text": "Scic3DViewer", "tile": True, "cross": True, "baked": True}  # Free: watermark and faint cross, set by the server
     assert share_images(free, watermark="mine").status_code == 200                    # the typed text is ignored for Free
     assert share_images(free, allow_download="true").status_code == 403               # Free: no model download
     assert share_images(free, pack=mkpack(az=72, el=3)).status_code == 400            # Light only (36 shots)
@@ -454,10 +473,11 @@ def test_image_links_are_gated_by_tier():
 def test_enterprise_fine_tunes_and_sets_its_own_watermark():
     db.create_license("E E", "img4@x.com", "ENTERPRISE", "30d")
     h = login("img4@x.com")
-    r = share_images(h, pack=mkpack(az=120, el=7, px=1400, anno=[[]] * 840), watermark="(c) Studio")
+    r = share_images(h, pack=mkpack(az=12, el=2, px=128, anno=[[]] * 24), watermark="(c) Studio")
     assert r.status_code == 200
     cfg = c.get(f"/api/projects/{r.json()['share_id']}/config").json()
-    assert cfg["watermark"] == {"text": "(c) Studio", "tile": False, "cross": False}
+    assert cfg["watermark"] == {"text": "(c) Studio", "tile": False, "cross": False, "baked": True}
+    assert share_images(h, pack=mkpack(az=120, el=7, px=1400, anno=[[]] * 840)).status_code == 200  # the High preset fits Enterprise (no watermark text: not re-encoded)
     assert share_images(h, pack=mkpack(az=181, el=1)).status_code == 400              # beyond the Enterprise ceiling
     assert share_images(h, pack=mkpack(az=3, el=1, anno=[[]])).status_code == 400    # anno list must match the frame count
 
@@ -483,7 +503,7 @@ def test_picture_link_stores_the_model_only_when_downloads_are_allowed():
     row = next(p for p in c.get("/api/projects", headers=h).json() if p["share_id"] == sid)
     assert row["has_model"] is False and row["kind"] == "images"
     assert post(allow_download="true").status_code == 400                             # downloads need the model file
-    assert c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}"}).status_code == 400   # 3D links need it too
+    assert c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}", "kind": "model"}).status_code == 400
     sid2 = share_images(h, allow_download="true").json()["share_id"]
     assert next(p for p in c.get("/api/projects", headers=h).json() if p["share_id"] == sid2)["has_model"] is True
 
@@ -499,7 +519,7 @@ def test_monthly_link_limit_per_tier(monkeypatch):
     assert r.status_code == 403 and "Monthly limit" in r.json()["detail"]
     assert c.delete(f"/api/projects/{first}", headers=h).status_code == 200            # deleting a link does not give the quota back
     assert share(h).status_code == 403
-    r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", "update_id": share_id_of(h)})
+    r = c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}", "update_id": share_id_of(h)})
     assert r.status_code == 200                                                        # republishing an existing link is free
     with db.connect() as con:                                                          # last month's links do not count
         con.execute("UPDATE activity SET ts=ts-40*86400 WHERE action='share'")
@@ -521,6 +541,106 @@ def test_pack_with_preview_pictures_is_validated():
         return b"S3IM" + len(ix).to_bytes(4, "little") + ix + b"1" * (n * 5) + b"2" * (n * 3)
     h = pro("thumb@x.com")
     assert share_images(h, pack=pack()).status_code == 200                           # previews are accepted
-    assert share_images(h, pack=mkpack()).status_code == 200                         # older packs without previews still are
+    assert share_images(h, pack=mkpack(thumbs=False)).status_code == 200              # older packs without previews still are
     assert share_images(h, pack=pack(thumbs="short")).status_code == 400
     assert share_images(h, pack=pack(thumbs="outside")).status_code == 400
+
+
+# ---------- watermark baked into the pictures, caching, shared limits, saved projects ----------
+def frames_of(pack: bytes):
+    n = int.from_bytes(pack[4:8], "little"); ix = json.loads(pack[8:8 + n]); data = pack[8 + n:]
+    return ix, [Image.open(io.BytesIO(data[o:o + ln])).convert("RGBA") for o, ln in ix["frames"]], [Image.open(io.BytesIO(data[o:o + ln])).convert("RGBA") for o, ln in ix["thumbs"]]
+
+
+def test_free_watermark_is_baked_into_the_pictures():
+    sid = share(login("bake@x.com")).json()["share_id"]
+    ix, frames, thumbs = frames_of(c.get(f"/api/projects/{sid}/images").content)       # what any visitor can download
+    flat = Image.open(io.BytesIO(_pic(64, "WEBP"))).convert("RGBA")                     # the picture as the browser sent it
+    assert any(f.tobytes() != flat.tobytes() for f in frames)                          # text or cross is in the pixels, no clean copy exists
+    assert all(len(set(f.getdata())) > 3 for f in frames) and len(frames) == 4 and len(thumbs) == 4
+    ok = frames_of(c.get(f"/api/projects/{share(pro('nobake@x.com')).json()['share_id']}/images").content)[1]
+    assert ok[0].tobytes() == flat.tobytes()                                           # Pro: pictures are left exactly as they were
+
+
+def test_enterprise_custom_watermark_is_baked_and_jpeg_packs_work():
+    db.create_license("W W", "wm@x.com", "ENTERPRISE", "30d")
+    h = login("wm@x.com")
+    sid = share_images(h, pack=mkpack(az=4, el=1, px=96, mime="image/jpeg"), watermark="(c) Mine").json()["share_id"]
+    ix, frames, _ = frames_of(c.get(f"/api/projects/{sid}/images").content)
+    assert ix["mime"] == "image/jpeg" and len(set(frames[0].getdata())) > 3
+
+
+def test_big_files_are_cached_but_still_revalidated():
+    h = pro("cache@x.com")
+    sid = share_images(h, allow_download="true").json()["share_id"]
+    for part in ("images", "model"):
+        r = c.get(f"/api/projects/{sid}/{part}")
+        assert r.status_code == 200 and r.headers["cache-control"] == "private, no-cache" and r.headers["etag"]
+        n = c.get(f"/api/projects/{sid}/{part}", headers={"If-None-Match": r.headers["etag"]})
+        assert n.status_code == 304 and n.content == b""                               # unchanged: nothing re-sent, Drive not read
+    etag = c.get(f"/api/projects/{sid}/images").headers["etag"]
+    assert c.patch(f"/api/projects/{sid}", headers=h, json={"revoked": True}).status_code == 200
+    assert c.get(f"/api/projects/{sid}/images", headers={"If-None-Match": etag}).status_code == 410   # a revoked link stops at once
+    assert c.get(f"/api/projects/{sid}/config").headers["cache-control"] == "no-store"   # views are still counted
+    sid2 = share_images(h).json()["share_id"]
+    assert c.patch(f"/api/projects/{sid2}", headers=h, json={"revoked": False}).status_code == 200
+    assert share_images(h, update_id=sid2).status_code == 200
+    assert c.get(f"/api/projects/{sid2}/images").headers["etag"] != etag               # a republished file gets a new validator
+
+
+def test_rate_limit_counters_live_in_the_database():
+    for _ in range(10):
+        c.get("/api/me")
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) FROM rate_hits").fetchone()[0] >= 0
+    r = None
+    for _ in range(125):
+        r = c.get("/api/projects/abcdefghij/config")
+    assert r.status_code == 429                                                        # the limit counts across requests (and workers)
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) FROM rate_hits WHERE bucket='view'").fetchone()[0] >= 120
+
+
+def test_signin_state_is_stored_in_the_database(monkeypatch):
+    with db.connect() as con:
+        con.execute("INSERT INTO oauth_pending VALUES('st1','login',NULL,'v',?)", (time.time() + 600,))
+    assert storage.purpose("st1") == "login" and storage.purpose("nope") is None
+    with pytest.raises(ValueError):
+        storage.finish("expired-or-unknown", "code")
+    with db.connect() as con:
+        con.execute("UPDATE oauth_pending SET expires=1 WHERE state='st1'")
+    with pytest.raises(ValueError):
+        storage.finish("st1", "code")                                                  # expired
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) FROM oauth_pending WHERE state='st1'").fetchone()[0] == 0   # one-time: removed when used
+
+
+def test_saved_projects_roundtrip_and_limits(monkeypatch):
+    assert [db.TIERS[t]["max_projects"] for t in ("FREE", "PRO", "ENTERPRISE")] == [10, 100, 1000]
+    monkeypatch.setitem(db.TIERS["FREE"], "max_projects", 2)
+    h = login("save@x.com")
+    save = lambda **d: c.post("/api/drive-projects", headers=h, files={"model": ("m.glb", GLB)}, data={"config": json.dumps({"annotations": []}), "name": "Bracket", **d})
+    r = save(thumb="data:image/jpeg;base64,AAAA"); assert r.status_code == 200
+    pid = r.json()["id"]
+    assert gzip.decompress(next(v for k, v in cloud.items() if k.endswith(f"{pid}.glb.gz".join(["", ""])) or ".glb.gz" in k)) == GLB   # stored in the user's Drive
+    listing = c.get("/api/drive-projects", headers=h).json()
+    assert listing["total"] == 1 and listing["max"] == 2 and listing["items"][0]["name"] == "Bracket" and listing["items"][0]["thumb"].startswith("data:image/")
+    assert c.get(f"/api/drive-projects/{pid}", headers=h).json()["config"] == {"annotations": []}
+    assert c.get(f"/api/drive-projects/{pid}/model", headers=h).content == GLB          # opened back from Drive
+    old = set(cloud)
+    assert save(project_id=pid, name="Bracket v2").status_code == 200                   # save over: same project, old file removed
+    assert c.get("/api/drive-projects", headers=h).json()["total"] == 1 and not (old & set(cloud))
+    assert c.patch(f"/api/drive-projects/{pid}", headers=h, json={"name": "Renamed"}).status_code == 200
+    assert c.get("/api/drive-projects", headers=h).json()["items"][0]["name"] == "Renamed"
+    assert save().status_code == 200
+    r = save(); assert r.status_code == 403 and "limit" in r.json()["detail"].lower()    # Free keeps 2 here (10 in real life)
+    other = login("other-save@x.com")
+    assert c.get(f"/api/drive-projects/{pid}", headers=other).status_code == 404         # nobody else can open or delete it
+    assert c.delete(f"/api/drive-projects/{pid}", headers=other).status_code == 404
+    assert c.post("/api/drive-projects", headers=other, files={"model": ("m.glb", GLB)}, data={"project_id": pid}).status_code == 404
+    assert c.delete(f"/api/drive-projects/{pid}", headers=h).status_code == 200
+    assert c.get("/api/drive-projects", headers=h).json()["total"] == 1 and len(cloud) == 1   # its Drive file is gone
+    assert c.post("/api/drive-projects", headers=h, files={"model": ("m.glb", b"nope")}).status_code == 400
+    assert c.post("/api/drive-projects", headers=h, files={"model": ("m.glb", GLB)}, data={"thumb": "javascript:1"}).status_code == 400
+    assert c.get("/api/me", headers=h).json()["projects_count"] == 1
+    assert not list(db.SHARES.glob("*"))                                                # nothing left on this server

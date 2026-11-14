@@ -1,4 +1,4 @@
-// Share page bootstrap: password + link info, then ONLY the code that link needs (3D engine or the small image viewer).
+// Share page bootstrap: password + link info, then the picture viewer (no 3D engine is ever loaded here).
 import { $ } from '/static/js/ui.js';
 
 const id = location.pathname.split('/').pop(), api = p => `/api/projects/${encodeURIComponent(id)}/${p}`;
@@ -29,6 +29,6 @@ $('#full').onclick = () => (document.fullscreenElement ? document.exitFullscreen
   if (!r.ok) return fail(r.status === 404 ? 'This link does not exist or was removed.' : r.status === 410 ? (await r.json()).detail : 'Could not load this project.');
   const p = await r.json();
   document.title = $('#title').textContent = p.title;
-  document.body.classList.toggle('images', p.kind === 'images'); // hides the 3D-only buttons
-  await (await import(p.kind === 'images' ? '/static/js/imgview.js' : '/static/js/viewer3d.js')).run(p, get, fail);
+  if (p.kind !== 'images') return fail('This link uses an older interactive format that is no longer supported. Ask its owner to publish it again.');
+  await (await import('/static/js/imgview.js')).run(p, get, fail);
 })().catch(e => fail('Could not load this project (' + e.message + ').'));

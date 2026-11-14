@@ -51,9 +51,6 @@ details.sec>div{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
   #projRows td:last-child{display:flex;flex-wrap:wrap;gap:6px} #projRows td:last-child .btn{flex:1 1 40%;min-height:42px;margin:0!important}
 }
 
-/* image (360) share links have no 3D tools */
-body.images #panelBtn,body.images #panel,body.images #tools,body.images #tour{display:none!important}
-
 /* sharing wizard: a moving timeline, the blue line slides from step to step */
 .tl{position:relative;display:flex;justify-content:space-between;margin:2px 0 4px}
 .tl:before{content:"";position:absolute;left:13px;right:13px;top:11px;height:3px;background:rgba(148,163,184,.25);border-radius:2px}
@@ -66,3 +63,50 @@ body.images #panelBtn,body.images #panel,body.images #tools,body.images #tour{di
 
 /* share page burger menu: options stacked, full width */
 #menu .btn{width:100%;text-align:left;min-height:42px}
+
+button.lbl{font-family:inherit;line-height:1.2}
+:focus-visible{outline:2px solid #38bdf8;outline-offset:2px}
+canvas:focus-visible{outline-offset:-3px}
+
+/* ---- Studio layout: menu bar, tool rail, tabbed inspector, status bar ---- */
+.brand{font-weight:800;letter-spacing:-.01em;margin:0 8px 0 4px;white-space:nowrap}
+.brand span{color:#38bdf8}
+.menu{position:relative}
+.mbtn{padding:6px 10px;border-radius:8px;background:transparent;border:0;color:inherit;cursor:pointer;font-size:13px}
+.mbtn:hover,.mbtn[aria-expanded=true]{background:rgba(255,255,255,.12)}
+.mpanel{position:fixed;z-index:40;min-width:240px;max-width:calc(100vw - 16px);padding:6px;border-radius:12px;background:#0f172a;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;max-height:calc(100dvh - 4rem);overflow-y:auto}
+.mitem{display:flex;justify-content:space-between;gap:24px;align-items:center;width:100%;text-align:left;padding:7px 10px;border-radius:8px;background:transparent;border:0;color:inherit;font-size:13px;cursor:pointer;text-decoration:none;position:relative}
+.mitem:hover:not(:disabled),.mitem:focus-visible{background:rgba(56,189,248,.2)}
+.mitem:disabled{opacity:.4;cursor:not-allowed}
+.mitem[aria-checked]{padding-left:28px}
+.mitem[aria-checked=true]::before{content:"\2713";position:absolute;left:10px;color:#38bdf8}
+.kbd{font-size:11px;color:#94a3b8;white-space:nowrap}
+.kbd2{font-family:ui-monospace,monospace;font-size:12px;color:#38bdf8}
+.msep{border:0;border-top:1px solid rgba(255,255,255,.1);margin:5px 0}
+.mhead{padding:8px 10px;font-size:13px;color:#cbd5e1;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:4px}
+.avatar{width:32px;height:32px;border-radius:50%;background:#0ea5e9;color:#fff;font-weight:700;display:grid;place-items:center;padding:0}
+#tools{max-height:calc(100dvh - 8rem);overflow-y:auto}
+.tbtn{width:38px;height:38px;border-radius:9px;background:transparent;border:1px solid transparent;color:#cbd5e1;display:grid;place-items:center;cursor:pointer;flex:none}
+.tbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tbtn:hover:not(:disabled){background:rgba(255,255,255,.12)}
+.tbtn.on,.tbtn[aria-pressed=true]{background:#0ea5e9;color:#fff;border-color:#38bdf8}
+.tbtn.opacity-50{opacity:.5}
+.tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.1);flex:none}
+.tab{flex:1;padding:10px 4px;background:transparent;border:0;border-bottom:2px solid transparent;color:#94a3b8;cursor:pointer;font-size:13px}
+.tab:hover{color:#e2e8f0}
+.tab.on{color:#fff;border-bottom-color:#38bdf8}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:6px}
+.dot[hidden]{display:none}
+#status .lock{margin-left:4px}
+.pcard{border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);overflow:hidden;display:flex;flex-direction:column}
+.pcard img,.pcard .ph{width:100%;height:110px;object-fit:cover;background:#0f172a;display:block}
+.pcard .meta{padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+@media (max-width:768px){
+  .brand{display:none}
+  .mbtn{padding:6px 7px}
+  #saveBtn{display:none} /* Save is in the File menu */
+  #topbar .btn{padding:4px 8px}
+  #status{gap:8px;font-size:11px}
+}
+
+#tour .btn{white-space:nowrap}

@@ -11,115 +11,223 @@
 <script src="https://cdn.tailwindcss.com/3.4.1"></script>
 </head>
 <body>
-<div id="stage"></div>
+<main id="stage"></main>
 
-<header class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-2 px-3 overflow-x-auto whitespace-nowrap">
-  <b class="mr-2">Scic3DViewer Studio</b>
-  <button class="btn" id="open">Open model</button>
-  <button class="btn" id="add" data-need="assembly">Add model</button>
+<!-- top bar: brand, menus, save, share, account -->
+<header id="topbar" class="fixed top-0 inset-x-0 h-12 glass z-20 flex items-center gap-1 px-2">
+  <b class="brand">Scic3D<span>Viewer</span></b>
+  <nav id="menubar" class="flex items-center" aria-label="Main menu">
+    <div class="menu"><button class="mbtn" data-menu="file" aria-haspopup="true" aria-expanded="false">File</button>
+      <div class="mpanel hidden" id="menu-file" role="menu">
+        <button class="mitem" role="menuitem" id="open">Open model…</button>
+        <button class="mitem" role="menuitem" id="add" data-need="assembly">Add model…</button>
+        <hr class="msep">
+        <button class="mitem" role="menuitem" id="mSave">Save to Google Drive<span class="kbd">Ctrl+S</span></button>
+        <button class="mitem" role="menuitem" id="mSaveAs">Save as…</button>
+        <button class="mitem" role="menuitem" id="mOpenDrive">Open from Google Drive…</button>
+        <hr class="msep">
+        <button class="mitem" role="menuitem" id="projects">My shared links…</button>
+        <button class="mitem" role="menuitem" id="export">Export model…</button>
+      </div></div>
+    <div class="menu"><button class="mbtn" data-menu="edit" aria-haspopup="true" aria-expanded="false">Edit</button>
+      <div class="mpanel hidden" id="menu-edit" role="menu">
+        <button class="mitem" role="menuitem" id="mUndo">Undo<span class="kbd">Ctrl+Z</span></button>
+        <button class="mitem" role="menuitem" id="mRedo">Redo<span class="kbd">Ctrl+Shift+Z</span></button>
+        <hr class="msep">
+        <button class="mitem" role="menuitem" id="mSnap" aria-checked="false">Snap moves &amp; rotation<span class="kbd">S</span></button>
+        <button class="mitem" role="menuitem" id="mDelete">Delete selected part</button>
+      </div></div>
+    <div class="menu"><button class="mbtn" data-menu="view" aria-haspopup="true" aria-expanded="false">View</button>
+      <div class="mpanel hidden" id="menu-view" role="menu">
+        <button class="mitem" role="menuitem" id="vFrame">Fit model to screen</button>
+        <button class="mitem" role="menuitem" id="vFront">Front view</button>
+        <button class="mitem" role="menuitem" id="vSide">Side view</button>
+        <button class="mitem" role="menuitem" id="vTop">Top view</button>
+        <hr class="msep">
+        <button class="mitem" role="menuitem" id="vGrid" aria-checked="true">Floor grid</button>
+        <button class="mitem" role="menuitem" id="vCallouts" aria-checked="true">Callout tags</button>
+        <button class="mitem" role="menuitem" id="vPanel" aria-checked="true">Inspector panel</button>
+        <hr class="msep">
+        <button class="mitem" role="menuitem" id="vFull">Fullscreen</button>
+        <button class="mitem" role="menuitem" id="vHelp">Keyboard shortcuts<span class="kbd">?</span></button>
+      </div></div>
+    <div class="menu"><button class="mbtn" data-menu="model" aria-haspopup="true" aria-expanded="false">Model</button>
+      <div class="mpanel hidden" id="menu-model" role="menu">
+        <button class="mitem" role="menuitem" id="zup" title="Use when a model lies on its side: its Z axis pointed up in the file">Z-up → Y-up (stand upright)</button>
+        <button class="mitem" role="menuitem" id="merge" data-need="assembly">Merge all parts</button>
+        <hr class="msep">
+        <button class="mitem" role="menuitem" id="mOptimize" data-need="decimate">Simplify mesh…</button>
+        <button class="mitem" role="menuitem" id="mPedestal" data-need="base">Add pedestal…</button>
+      </div></div>
+  </nav>
   <input type="file" id="file" accept=".glb,.gltf,.obj,.stl,.fbx,.3mf,.step,.stp" multiple class="hidden">
-  <button class="btn" id="projects">My projects</button>
-  <button class="btn" id="drive">Google Drive</button>
-  <button class="btn hidden" id="upgrade">Upgrade</button>
-  <a class="btn hidden" id="adminLink" href="/admin">Admin</a>
-  <button class="btn btn-p" id="share">Share link</button>
-  <button class="btn" id="export">Export…</button>
   <span class="flex-1"></span>
-  <span class="text-xs text-slate-400" id="tris"></span>
-  <span class="lock" id="tier"></span>
-  <span class="text-xs text-slate-300" id="who"></span>
-  <button class="btn" id="signout">Sign out</button>
-  <button class="btn md:hidden" id="panelBtn">Panel</button>
+  <button class="btn" id="saveBtn" title="Save to your Google Drive (Ctrl+S)"><span class="dot" id="saveDot" hidden></span>Save</button>
+  <button class="btn btn-p" id="share" title="Publish a 360° picture link">Share</button>
+  <button class="btn md:hidden" id="panelBtn" aria-label="Inspector">Panel</button>
+  <div class="menu"><button class="mbtn avatar" data-menu="account" id="accountBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account"><span id="initial">?</span></button>
+    <div class="mpanel hidden" id="menu-account" role="menu">
+      <div class="mhead"><b id="who">Not signed in</b></div>
+      <button class="mitem hidden" role="menuitem" id="upgrade">Upgrade license…</button>
+      <button class="mitem" role="menuitem" id="drive">Google Drive…</button>
+      <a class="mitem hidden" role="menuitem" id="adminLink" href="/admin">Admin panel</a>
+      <hr class="msep">
+      <a class="mitem" role="menuitem" href="/privacy" target="_blank" rel="noopener">Privacy</a>
+      <a class="mitem" role="menuitem" href="/terms" target="_blank" rel="noopener">Terms</a>
+      <hr class="msep">
+      <button class="mitem" role="menuitem" id="signout">Sign out</button>
+    </div></div>
 </header>
 
-<nav id="tools" class="fixed left-3 top-16 glass rounded-xl p-1 z-20 flex flex-col gap-1">
-  <button class="btn on" data-mode="select" title="Select / orbit">Select</button>
-  <button class="btn" data-mode="brush" title="Paint brush">Brush</button>
-  <button class="btn" data-mode="fill" data-need="paint_fill" title="Edge-aware fill">Fill</button>
-  <button class="btn" data-mode="annotate" title="Add callout">Callout</button>
-  <button class="btn" data-mode="ruler" data-need="measure" title="Ruler">Ruler</button>
-  <button class="btn" data-mode="angle" data-need="measure" title="Angle">Angle</button>
-  <button class="btn" data-mode="thickness" data-need="measure" title="Wall thickness">Thick</button>
+<!-- left tool rail -->
+<nav id="tools" class="fixed left-2 top-14 glass rounded-xl p-1 z-20 flex flex-col gap-1" aria-label="Tools">
+  <button class="tbtn on" data-mode="select" title="Select / orbit (Esc)" aria-label="Select"><svg viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6z"/></svg></button>
+  <button class="tbtn" data-gizmo="translate" data-need="assembly" title="Move (W)" aria-label="Move"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
+  <button class="tbtn" data-gizmo="rotate" data-need="assembly" title="Rotate (E)" aria-label="Rotate"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/></svg></button>
+  <button class="tbtn" data-gizmo="scale" data-need="assembly" title="Scale (R)" aria-label="Scale"><svg viewBox="0 0 24 24"><path d="M4 20l16-16M14 4h6v6M10 20H4v-6"/></svg></button>
+  <button class="tbtn" id="snapBtn" title="Snap moves and rotation (S)" aria-label="Snap" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3zM6 7h4M14 7h4"/></svg></button>
   <hr class="border-white/10">
-  <button class="btn" data-gizmo="translate" data-need="assembly" title="Move (W)">Move</button>
-  <button class="btn" data-gizmo="rotate" data-need="assembly" title="Rotate (E)">Rot</button>
-  <button class="btn" data-gizmo="scale" data-need="assembly" title="Scale (R)">Scale</button>
+  <button class="tbtn" data-mode="brush" title="Paint brush" aria-label="Brush"><svg viewBox="0 0 24 24"><path d="M14 4l6 6-8 8-4 1 1-4zM5 19l-1 1"/></svg></button>
+  <button class="tbtn" data-mode="fill" data-need="paint_fill" title="Edge-aware fill" aria-label="Fill"><svg viewBox="0 0 24 24"><path d="M5 11l7-7 7 7-7 7zM19 15s2 2.5 2 4a2 2 0 0 1-4 0c0-1.5 2-4 2-4z"/></svg></button>
+  <hr class="border-white/10">
+  <button class="tbtn" data-mode="annotate" title="Add a callout" aria-label="Callout"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></button>
+  <button class="tbtn" data-mode="ruler" data-need="measure" title="Ruler" aria-label="Ruler"><svg viewBox="0 0 24 24"><path d="M3 15L15 3l6 6-12 12zM7 11l2 2M10 8l2 2M13 5l2 2"/></svg></button>
+  <button class="tbtn" data-mode="angle" data-need="measure" title="Angle between faces" aria-label="Angle"><svg viewBox="0 0 24 24"><path d="M4 20h16M4 20L16 6M9 20a6 6 0 0 0-1.2-3.6"/></svg></button>
+  <button class="tbtn" data-mode="thickness" data-need="measure" title="Wall thickness" aria-label="Thickness"><svg viewBox="0 0 24 24"><path d="M4 4v16M20 4v16M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"/></svg></button>
 </nav>
 
-<aside id="panel" class="fixed right-0 top-12 bottom-0 w-80 glass z-20 overflow-y-auto">
-  <details class="sec" open><summary>Parts outliner</summary><div>
-    <div id="outliner" class="max-h-52 overflow-y-auto"></div>
-    <div class="row"><button class="btn" id="zup" title="Use when a model lies on its side: its Z axis pointed up in the file">Z-up &rarr; Y-up</button><button class="btn" id="merge" data-need="assembly">Merge all</button><span class="text-xs text-slate-400">dbl-click name to rename</span></div>
-  </div></details>
+<!-- right inspector: tabs instead of one long list -->
+<aside id="panel" class="fixed right-0 top-12 bottom-7 w-80 glass z-20 flex flex-col" aria-label="Inspector">
+  <div class="tabs" role="tablist">
+    <button class="tab on" role="tab" data-tab="scene" aria-selected="true">Scene</button>
+    <button class="tab" role="tab" data-tab="parts" aria-selected="false">Parts</button>
+    <button class="tab" role="tab" data-tab="tools" aria-selected="false">Tools</button>
+    <button class="tab" role="tab" data-tab="output" aria-selected="false">Output</button>
+  </div>
+  <div class="panes flex-1 overflow-y-auto">
+    <div data-pane="scene">
+      <details class="sec" open><summary>Stage</summary><div>
+        <div class="row"><label for="backdrop">Backdrop</label><select id="backdrop" class="inp" style="width:140px"></select></div>
+        <div class="row"><label for="grid">Floor grid</label><input type="checkbox" id="grid" checked></div>
+        <div class="row"><label for="light">Lights</label><input type="range" id="light" min="0" max="2" step=".05" value="1"></div>
+        <div class="row"><label for="lpreset">Lighting</label><select id="lpreset" class="inp" style="width:140px"><option value="studio">Studio</option><option value="soft">Soft</option><option value="dramatic">Dramatic</option><option value="flat">Flat</option></select></div>
+        <div class="row"><label for="shadows">Soft shadow</label><input type="checkbox" id="shadows" checked></div>
+      </div></details>
+      <details class="sec" open><summary>Material &amp; reflections</summary><div>
+        <div class="row"><label for="rough">Roughness</label><input type="range" id="rough" min="0" max="1" step=".01" value=".5"></div>
+        <div class="row"><label for="metal">Metalness</label><input type="range" id="metal" min="0" max="1" step=".01" value="0"></div>
+        <div class="row"><label for="env">Environment</label>
+          <select id="env" class="inp" style="width:140px"><option value="softbox">Softbox Studio</option><option value="showroom">Showroom</option><option value="daylight">Daylight Sky</option><option value="none">None</option></select></div>
+        <div class="row"><label for="envI">Reflection</label><input type="range" id="envI" min="0" max="3" step=".05" value="1"></div>
+        <div data-need="hdri" class="row"><label for="hdr">Custom .HDR</label><input type="file" id="hdr" accept=".hdr" class="text-xs w-40"></div>
+      </div></details>
+      <details class="sec" id="secPedestal"><summary>Pedestal</summary><div data-need="base">
+        <div class="row"><label for="bshape">Shape</label><select id="bshape" class="inp" style="width:130px"><option value="cylinder">Cylinder</option><option value="beveled">Beveled</option><option value="square">Square</option></select></div>
+        <div class="row"><label for="bfinish">Finish</label><select id="bfinish" class="inp" style="width:130px"><option value="slate">Slate</option><option value="steel">Steel</option><option value="glass">Glass</option><option value="obsidian">Obsidian</option></select></div>
+        <div class="row"><label for="bradius">Radius</label><input type="range" id="bradius" min=".3" max="3" step=".05" value="1.3"></div>
+        <div class="row"><label for="bheight">Height</label><input type="range" id="bheight" min=".05" max="1" step=".01" value=".15"></div>
+        <div class="row"><button class="btn btn-p" id="bapply">Apply</button><button class="btn" id="bbake">Bake into model</button><button class="btn" id="bremove">Remove</button></div>
+      </div></details>
+    </div>
 
-  <details class="sec"><summary>Stage</summary><div>
-    <div class="row"><label for="backdrop">Backdrop</label><select id="backdrop" class="inp" style="width:140px"></select></div>
-    <div class="row"><label for="grid">Floor grid</label><input type="checkbox" id="grid" checked></div>
-    <div class="row"><label for="light">Lights</label><input type="range" id="light" min="0" max="2" step=".05" value="1"></div>
-    <div class="row"><label for="lpreset">Lighting</label><select id="lpreset" class="inp" style="width:140px"><option value="studio">Studio</option><option value="soft">Soft</option><option value="dramatic">Dramatic</option><option value="flat">Flat</option></select></div>
-    <div class="row"><label for="shadows">Soft shadow</label><input type="checkbox" id="shadows" checked></div>
-  </div></details>
+    <div data-pane="parts" class="hidden">
+      <details class="sec" open><summary>Parts</summary><div>
+        <div id="outliner" class="max-h-60 overflow-y-auto"></div>
+        <p class="text-xs text-slate-400">Click a name to select, double-click to rename.</p>
+      </div></details>
+      <details class="sec" open><summary>Callouts</summary><div>
+        <p class="text-xs text-slate-400">Pick the callout tool, then click the model. Callouts stay on their part when you move it.</p>
+        <div id="annoList" class="flex flex-col gap-1"></div>
+      </div></details>
+      <details class="sec"><summary>Exploded view</summary><div data-need="explode">
+        <div class="row"><label for="explode">Explode</label><input type="range" id="explode" min="0" max="100" step="1" value="0"></div>
+        <p class="text-xs text-slate-400" id="explodeNote"></p>
+      </div></details>
+      <details class="sec"><summary>Cross-section</summary><div data-need="slicer">
+        <div class="row"><label for="clipOn">Z clipping plane</label><input type="checkbox" id="clipOn"></div>
+        <div class="row"><label for="clipZ">Position</label><input type="range" id="clipZ" min="-1" max="1" step=".01" value="1"></div>
+      </div></details>
+    </div>
 
-  <details class="sec"><summary>Material &amp; reflections</summary><div>
-    <div class="row"><label for="rough">Roughness</label><input type="range" id="rough" min="0" max="1" step=".01" value=".5"></div>
-    <div class="row"><label for="metal">Metalness</label><input type="range" id="metal" min="0" max="1" step=".01" value="0"></div>
-    <div class="row"><label for="env">Environment</label>
-      <select id="env" class="inp" style="width:140px"><option value="softbox">Softbox Studio</option><option value="showroom">Showroom</option><option value="daylight">Daylight Sky</option><option value="none">None</option></select></div>
-    <div class="row"><label for="envI">Reflection</label><input type="range" id="envI" min="0" max="3" step=".05" value="1"></div>
-    <div data-need="hdri" class="row"><label for="hdr">Custom .HDR</label><input type="file" id="hdr" accept=".hdr" class="text-xs w-40"></div>
-  </div></details>
+    <div data-pane="tools" class="hidden">
+      <details class="sec" open><summary>Paint</summary><div>
+        <div class="row"><label for="pcolor">Color</label><input type="color" id="pcolor" value="#ef4444"></div>
+        <div class="row"><label for="pradius">Brush radius</label><input type="range" id="pradius" min=".01" max=".6" step=".01" value=".12"></div>
+        <div class="row" data-need="paint_fill"><label for="pangle">Crease angle <span id="pangleV">30°</span></label><input type="range" id="pangle" min="5" max="180" step="1" value="30"></div>
+        <div class="row"><button class="btn" id="undo" data-need="paint_undo">Undo</button><button class="btn" id="reset">Reset colors</button></div>
+      </div></details>
+      <details class="sec"><summary>Measure</summary><div data-need="measure">
+        <div class="row"><label for="unit">Unit</label><select id="unit" class="inp" style="width:110px"><option>units</option><option>mm</option><option>cm</option><option>in</option></select></div>
+        <div class="row"><label for="uscale">Scale factor</label><input type="number" id="uscale" class="inp" value="1" min="0.0001" step="any" style="width:110px"></div>
+        <button class="btn" id="clearDims">Clear measurements</button>
+        <p class="text-xs text-slate-400">Ruler: 2 points. Angle: 2 faces. Thick: 1 point.</p>
+      </div></details>
+      <details class="sec" id="secOptimize"><summary>Optimize mesh</summary><div data-need="decimate">
+        <div class="row"><label for="keep">Keep <span id="keepV">50%</span></label><input type="range" id="keep" min="5" max="95" step="5" value="50"></div>
+        <div class="row"><button class="btn btn-p" id="decimate">Simplify</button><button class="btn" id="revert">Revert</button></div>
+        <p class="text-xs text-slate-400" id="optNote"></p>
+      </div></details>
+    </div>
 
-  <details class="sec"><summary>Paint</summary><div>
-    <div class="row"><label for="pcolor">Color</label><input type="color" id="pcolor" value="#ef4444"></div>
-    <div class="row"><label for="pradius">Brush radius</label><input type="range" id="pradius" min=".01" max=".6" step=".01" value=".12"></div>
-    <div class="row" data-need="paint_fill"><label for="pangle">Crease angle <span id="pangleV">30°</span></label><input type="range" id="pangle" min="5" max="180" step="1" value="30"></div>
-    <div class="row"><button class="btn" id="undo" data-need="paint_undo">Undo</button><button class="btn" id="reset">Reset colors</button></div>
-  </div></details>
-
-  <details class="sec"><summary>Cross-section</summary><div data-need="slicer">
-    <div class="row"><label for="clipOn">Z clipping plane</label><input type="checkbox" id="clipOn"></div>
-    <div class="row"><label for="clipZ">Position</label><input type="range" id="clipZ" min="-1" max="1" step=".01" value="1"></div>
-  </div></details>
-
-  <details class="sec"><summary>Exploded view</summary><div data-need="explode">
-    <div class="row"><label for="explode">Explode</label><input type="range" id="explode" min="0" max="100" step="1" value="0"></div>
-    <p class="text-xs text-slate-400" id="explodeNote"></p>
-  </div></details>
-
-  <details class="sec"><summary>Measure</summary><div data-need="measure">
-    <div class="row"><label for="unit">Unit</label><select id="unit" class="inp" style="width:110px"><option>units</option><option>mm</option><option>cm</option><option>in</option></select></div>
-    <div class="row"><label for="uscale">Scale factor</label><input type="number" id="uscale" class="inp" value="1" min="0.0001" step="any" style="width:110px"></div>
-    <button class="btn" id="clearDims">Clear measurements</button>
-    <p class="text-xs text-slate-400">Ruler: 2 points. Angle: 2 faces. Thick: 1 point.</p>
-  </div></details>
-
-  <details class="sec"><summary>Callouts</summary><div>
-    <p class="text-xs text-slate-400">Pick “Callout”, then click the model. Hover a callout to spotlight it.</p>
-    <div id="annoList" class="flex flex-col gap-1"></div>
-  </div></details>
-
-  <details class="sec"><summary>Pedestal</summary><div data-need="base">
-    <div class="row"><label for="bshape">Shape</label><select id="bshape" class="inp" style="width:130px"><option value="cylinder">Cylinder</option><option value="beveled">Beveled</option><option value="square">Square</option></select></div>
-    <div class="row"><label for="bfinish">Finish</label><select id="bfinish" class="inp" style="width:130px"><option value="slate">Slate</option><option value="steel">Steel</option><option value="glass">Glass</option><option value="obsidian">Obsidian</option></select></div>
-    <div class="row"><label for="bradius">Radius</label><input type="range" id="bradius" min=".3" max="3" step=".05" value="1.3"></div>
-    <div class="row"><label for="bheight">Height</label><input type="range" id="bheight" min=".05" max="1" step=".01" value=".15"></div>
-    <div class="row"><button class="btn btn-p" id="bapply">Apply</button><button class="btn" id="bbake">Bake into model</button><button class="btn" id="bremove">Remove</button></div>
-  </div></details>
-
-  <details class="sec"><summary>Optimize mesh</summary><div data-need="decimate">
-    <div class="row"><label for="keep">Keep <span id="keepV">50%</span></label><input type="range" id="keep" min="5" max="95" step="5" value="50"></div>
-    <div class="row"><button class="btn btn-p" id="decimate">Simplify</button><button class="btn" id="revert">Revert</button></div>
-    <p class="text-xs text-slate-400" id="optNote"></p>
-  </div></details>
-
-  <details class="sec"><summary>Capture</summary><div data-need="capture">
-    <div class="row"><button class="btn" id="png">Transparent PNG</button><button class="btn" id="webm">360° WebM</button></div>
-  </div></details>
-  <p class="text-xs text-slate-500 p-3"><a class="underline" href="/privacy" target="_blank" rel="noopener">Privacy</a> &middot; <a class="underline" href="/terms" target="_blank" rel="noopener">Terms</a></p>
+    <div data-pane="output" class="hidden">
+      <details class="sec" open><summary>Capture</summary><div data-need="capture">
+        <div class="row"><button class="btn" id="png">Transparent PNG</button><button class="btn" id="webm">360° WebM</button></div>
+      </div></details>
+      <details class="sec" open><summary>Publish</summary><div>
+        <p class="text-xs text-slate-400">Use <b>Share</b> in the top bar to publish a 360° picture link, and <b>File → Export model</b> for model files.</p>
+      </div></details>
+    </div>
+  </div>
 </aside>
 
 <div id="tour"></div>
-<div id="toast" class="hidden"></div>
+
+<!-- status bar -->
+<footer id="status" class="fixed bottom-0 inset-x-0 h-7 glass z-20 flex items-center gap-3 px-3 text-xs text-slate-300 whitespace-nowrap overflow-hidden" aria-label="Status">
+  <span id="tris">No model</span>
+  <span id="saveState" role="status">Not saved</span>
+  <label class="flex items-center gap-1">Snap <select id="snapDeg" class="inp" style="width:64px;padding:0 4px" aria-label="Rotation snap step"><option value="5">5°</option><option value="15" selected>15°</option><option value="30">30°</option><option value="45">45°</option><option value="90">90°</option></select></label>
+  <span class="flex-1"></span>
+  <span id="quota" class="hidden sm:inline"></span>
+  <span class="lock" id="tier"></span>
+</footer>
+<div id="toast" class="hidden" role="status" aria-live="polite"></div>
+
+<div id="saveModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <form id="saveForm" class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-3">
+    <h2 class="text-lg font-bold">Save to Google Drive</h2>
+    <label class="text-xs">Project name<input class="inp" id="saveName" maxlength="80" required></label>
+    <p class="text-xs text-slate-400" id="saveInfo">The model and everything you set up (lights, colours, callouts…) are saved in your own Google Drive.</p>
+    <p class="text-xs text-red-400 hidden" id="saveErr" role="alert"></p>
+    <div class="row"><button class="btn" type="button" id="saveCancel">Cancel</button><button class="btn btn-p" id="saveGo">Save</button></div>
+  </form>
+</div>
+
+<div id="openModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-3xl max-h-[85vh] flex flex-col gap-3">
+    <div class="row"><h2 class="text-lg font-bold">Open from Google Drive</h2><button class="btn" id="openClose">Close</button></div>
+    <p class="text-xs text-slate-400" id="openCount"></p>
+    <div id="openGrid" class="grid gap-3 overflow-auto" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))"></div>
+    <p class="text-xs text-slate-400" id="openEmpty"></p>
+    <button class="btn hidden" id="openMore">Load more</button>
+  </div>
+</div>
+
+<div id="helpModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+  <div class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-2">
+    <h2 class="text-lg font-bold">Keyboard shortcuts</h2>
+    <dl class="text-sm grid gap-1" style="grid-template-columns:auto 1fr;column-gap:16px">
+      <dt class="kbd2">W / E / R</dt><dd>Move / Rotate / Scale</dd>
+      <dt class="kbd2">S</dt><dd>Snap moves and rotation on or off</dd>
+      <dt class="kbd2">Ctrl+Z</dt><dd>Undo</dd>
+      <dt class="kbd2">Ctrl+Shift+Z</dt><dd>Redo</dd>
+      <dt class="kbd2">Ctrl+S</dt><dd>Save to Google Drive</dd>
+      <dt class="kbd2">Esc</dt><dd>Back to the select tool</dd>
+      <dt class="kbd2">?</dt><dd>This list</dd>
+    </dl>
+    <button class="btn" id="helpClose">Close</button>
+  </div>
+</div>
 
 <div id="authModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
   <div id="authForm" class="glass rounded-2xl p-6 w-full max-w-sm flex flex-col gap-3">
@@ -209,7 +317,7 @@
 
 <div id="projectsModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
   <div class="glass rounded-2xl p-6 w-full max-w-3xl max-h-[85vh] flex flex-col gap-3">
-    <div class="row"><h2 class="text-lg font-bold">My projects</h2><button class="btn" id="projClose">Close</button></div>
+    <div class="row"><h2 class="text-lg font-bold">My shared links</h2><button class="btn" id="projClose">Close</button></div>
     <div class="overflow-auto"><table class="w-full text-sm"><tbody id="projRows"></tbody></table></div>
     <p class="text-xs text-slate-400" id="projEmpty"></p>
   </div>

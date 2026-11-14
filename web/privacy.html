@@ -29,7 +29,9 @@
     <tr><td><b>Name and email address</b> of your Google account</td><td>To sign you in, to apply the license issued to your email, and to send license emails</td><td>&ldquo;Sign in with Google&rdquo;. We never see your Google password.</td></tr>
     <tr><td><b>Session token</b> (a random code, stored hashed on our server and in your browser&rsquo;s local storage)</td><td>To keep you signed in for up to 30 days</td><td>Created when you sign in. We do not use tracking cookies.</td></tr>
     <tr><td><b>Google Drive access token</b>, only if you allow Drive access (at sign-in or with &ldquo;Connect Drive&rdquo;)</td><td>To save your shared models in your own Drive and to show them to people who open your links</td><td>Google. Stored <b>encrypted</b> on our server. You can disconnect at any time.</td></tr>
-    <tr><td><b>Your shared projects</b>: title, scene settings (camera, lighting, callout texts), link options (expiry, password hash, permissions), view counter</td><td>To provide the sharing service</td><td>What you publish. The 3D model file itself is stored in <b>your</b> Google Drive, not on our server.</td></tr>
+    <tr><td><b>Your shared links</b>: title, scene settings (camera, lighting, callout texts), link options (expiry, password hash, permissions, watermark), view counter</td><td>To provide the sharing service</td><td>What you publish. A link is a set of 360&deg; pictures (with the watermark of your tier drawn into them) stored in <b>your</b> Google Drive, plus the 3D model file only if you allow downloads. None of it is kept on our server.</td></tr>
+    <tr><td><b>Your saved projects</b>: name, scene settings, a small preview picture</td><td>To let you save and reopen your work</td><td>What you save with &ldquo;Save to Google Drive&rdquo;. The model file is stored in <b>your</b> Google Drive.</td></tr>
+    <tr><td><b>Request counters</b>: IP address, kind of request, time</td><td>To slow down abuse (rate limits)</td><td>Our server, automatically. Deleted after one hour at most.</td></tr>
     <tr><td><b>License data</b>: tier, start and end dates, name and email</td><td>To grant the features you are entitled to</td><td>Issued by us or created after a payment.</td></tr>
     <tr><td><b>Activity log</b>: time, action (sign-in, publish, view of a link, admin action), IP address</td><td>Security, abuse prevention, troubleshooting and basic usage statistics</td><td>Our server, automatically</td></tr>
     <tr><td><b>Payment information</b></td><td>To sell licenses</td><td>Handled entirely by <b>Stripe</b>. We never receive your card number; we only learn that a payment succeeded, your email and the plan.</td></tr>
@@ -75,7 +77,8 @@
   <ul>
     <li>Sessions: up to 30 days, or until you sign out.</li>
     <li>Drive token: until you disconnect Drive or ask us to delete your data.</li>
-    <li>Shared project records: until you delete the project or your data.</li>
+    <li>Shared link and saved project records: until you delete them or your data.</li>
+    <li>Request counters (IP address and time, used for rate limits): at most one hour.</li>
     <li>Activity log: kept while needed for security and statistics, and removed when you ask us to delete your data.</li>
     <li>Payment and license records: as long as the law requires.</li>
   </ul>
