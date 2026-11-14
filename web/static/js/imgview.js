@@ -116,12 +116,16 @@ export async function run(p, get, fail) {
     const i = frameAt(); cv.dataset.frame = i;
     if (i !== curI) { curI = i; lastChange = now; fired = false; }   // a new picture: back to previews until it rests
     const settled = now - lastChange >= FULL_AFTER;
-    let b = null, q = 'low';
-    if ((settled || !hasThumbs) && complete) { b = decode(fc, ix.frames, i); if (b) q = 'full'; }
-    if (!b && hasThumbs) b = decode(tc, ix.thumbs, i);
-    const near = []; for (const d of [1, -1, 2, -2]) near.push((((i % az) + d + az) % az) + Math.floor(i / az) * az); // neighbours around the ring
-    if (i >= az) near.push(i - az); if (i < az * (el - 1)) near.push(i + az);
-    near.forEach(n => (hasThumbs ? decode(tc, ix.thumbs, n) : complete && decode(fc, ix.frames, n)));
+    const lv = auto && level.ready && level.row === rowOf(i) ? level.map.get(i) : null; // auto-rotate: straight from memory
+    let b = null, q = 'low'; cv.dataset.spin = lv ? 'preloaded' : '';
+    if (lv) { b = lv; q = level.q; }
+    else {
+      if ((settled || !hasThumbs) && complete) { b = decode(fc, ix.frames, i); if (b) q = 'full'; }
+      if (!b && hasThumbs) b = decode(tc, ix.thumbs, i);
+      const near = []; for (const d of [1, -1, 2, -2]) near.push((((i % az) + d + az) % az) + Math.floor(i / az) * az); // neighbours around the ring
+      if (i >= az) near.push(i - az); if (i < az * (el - 1)) near.push(i + az);
+      near.forEach(n => (hasThumbs ? decode(tc, ix.thumbs, n) : complete && decode(fc, ix.frames, n)));
+    }
     if (b) { last = b; lastQ = q; }
     fullShown = lastQ === 'full' && (settled || !hasThumbs); cv.dataset.quality = lastQ;
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -133,6 +137,41 @@ export async function run(p, get, fail) {
       const a = fa[j]; c.hidden = !calloutsOn || !a || a[2] < SEEN || !last;
       if (a) c.style.transform = `translate(${(ox + a[0] * w * s) * k}px,${(oy + a[1] * h * s) * k}px) translate(-50%,-130%)`;
     });
+  }
+
+  // Auto-rotate: first decode every picture of the current height, so the spin never waits for a decode. Full pictures when they fit the
+  // memory budget (small screens get less), otherwise the 320 px previews. The spin starts when they are all ready and they are let go
+  // a few seconds after it stops.
+  const level = { row: -1, map: new Map(), ready: true, q: 'low', token: 0, drop: 0 };
+  const budget = Math.min(400, (navigator.deviceMemory || 2.5) * 64) * 1048576;
+  const lbadge = Object.assign(document.createElement('div'), { className: 'fixed left-3 top-24 z-10 text-xs text-slate-300 glass rounded-lg px-2 py-1', role: 'status' });
+  const rowOf = i => Math.floor(i / az), curRow = () => Math.max(0, Math.min(el - 1, Math.round(E)));
+  function dropLevel() { level.token++; level.map.forEach(bm => bm !== last && bm.close?.()); level.map = new Map(); level.row = -1; level.ready = true; lbadge.remove(); }
+  async function loadLevel(row) {
+    dropLevel(); const token = level.token; level.row = row;
+    const full = complete && az * w * h * 4 <= budget, list = full ? ix.frames : hasThumbs ? ix.thumbs : null;
+    if (!list) return; // no room for full pictures and no previews: the normal cache is used instead
+    level.ready = false; level.q = full ? 'full' : 'low'; document.body.append(lbadge);
+    const c0 = ((Math.round(A) % az) + az) % az, order = Array.from({ length: az }, (_, k) => row * az + ((c0 + k) % az)); // the nearest ones first
+    let next = 0, done = 0;
+    const worker = async () => {
+      for (;;) {
+        const k = next++; if (k >= order.length || token !== level.token) return;
+        const i = order[k], [o, len] = list[i];
+        try {
+          const bmp = await createImageBitmap(pack.slice(base + o, base + o + len, ix.mime));
+          if (token !== level.token) { bmp.close?.(); return; }
+          level.map.set(i, bmp);
+        } catch { /* a picture that cannot be decoded is skipped */ }
+        lbadge.textContent = `Preparing a smooth spin… ${++done}/${az}`;
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    if (token === level.token) { level.ready = true; lbadge.remove(); dirty = true; }
+  }
+  function setAuto(on) {
+    auto = on; const b = $('#rotate'); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
+    clearTimeout(level.drop); if (!on) level.drop = setTimeout(dropLevel, 15000); // keep them a moment in case the spin is started again
   }
 
   // input: drag (mouse or finger) rotates, wheel or pinch zooms, arrow keys step
@@ -160,7 +199,7 @@ export async function run(p, get, fail) {
     if (e.key === '+' || e.key === '=') { zoom *= 1.25; clampZoom(); } else if (e.key === '-') { zoom /= 1.25; clampZoom(); } else if (e.key === '0') { zoom = 1; clampZoom(); }
   });
   $('#rotate').setAttribute('aria-pressed', 'false');
-  $('#rotate').onclick = e => { auto = !auto; e.currentTarget.classList.toggle('on', auto); e.currentTarget.setAttribute('aria-pressed', auto); };
+  $('#rotate').onclick = () => setAuto(!auto);
 
   // callout click: turn to the picture where that callout faces the camera, closest to the centre
   function showAnno(i) {
@@ -172,7 +211,7 @@ export async function run(p, get, fail) {
   }
   function turnTo(a, e) { // smooth turn to picture column `a` and height `e`, by the shortest way round; also resets zoom
     let dA = a - (((A % az) + az) % az); if (dA > az / 2) dA -= az; if (dA < -az / 2) dA += az;
-    zoom = 1; px = py = 0; auto = false; $('#rotate').classList.remove('on'); $('#rotate').setAttribute('aria-pressed', 'false');
+    zoom = 1; px = py = 0; setAuto(false);
     if (calm) { A += dA; E = e; } else anim = { t0: performance.now(), A0: A, E0: E, dA, dE: e - E };
     dirty = true;
   }
@@ -191,7 +230,10 @@ export async function run(p, get, fail) {
     const dt = Math.min(.05, (now - t) / 1000); t = now;
     if (anim) { const k = Math.min(1, (now - anim.t0) / 700), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; A = anim.A0 + anim.dA * e; E = anim.E0 + anim.dE * e; if (k >= 1) anim = null; dirty = true; }
     else if (!ptrs.size && (Math.abs(vA) > .002 || Math.abs(vE) > .002)) { A += vA; E = Math.max(0, Math.min(el - 1, E + vE)); vA *= .93; vE *= .8; dirty = true; } // inertia after release
-    if (auto && !ptrs.size && !calm) { A += az * dt / 12; dirty = true; }
+    if (auto && !ptrs.size && !calm) {
+      if (level.row !== curRow()) loadLevel(curRow()); // (also when a vertical drag moved to another height)
+      if (level.ready) { A += az * dt / 12; dirty = true; } // the spin waits until every picture of this height is in memory
+    }
     if (!fired && curI >= 0 && !fullShown && now - lastChange >= FULL_AFTER) { fired = true; dirty = true; } // rested on one picture: load the full one
     if (dirty) { dirty = false; draw(now); }
     requestAnimationFrame(loop);

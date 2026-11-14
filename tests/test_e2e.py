@@ -572,3 +572,30 @@ def test_inspector_collapses_and_menus_stay_on_top(server):
         page.click("#accountBtn"); assert page.evaluate(on_top, "#menu-account")
         page.keyboard.press("Escape")
         browser.close()
+
+
+def test_auto_rotate_loads_the_whole_height_first(server):
+    db.create_license("Spin S", "spin@x.com", "ENTERPRISE", "30d")
+    token = db.login_google("Spin S", "spin@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        url = publish_images(browser, token, dict(iAz=60, iEl=2, iPx=256, iQ=60, iElMin=10, iElMax=45))   # 60 pictures around, 2 heights
+        viewer = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page()
+        viewer.goto(url)
+        viewer.wait_for_function("document.querySelector('#stage canvas')?.dataset.quality === 'full'", timeout=60000)
+        assert viewer.evaluate("document.querySelector('#stage canvas').dataset.spin") == ""
+        viewer.click("#menuBtn"); viewer.click("#rotate")                                  # start the auto-rotate
+        viewer.wait_for_function("document.querySelector('#stage canvas').dataset.spin === 'preloaded'", timeout=30000)
+        row = viewer.evaluate("Math.floor(+document.querySelector('#stage canvas').dataset.frame / 60)")
+        seen, stale = set(), 0
+        for _ in range(40):                                                                 # watch the spin for about 3 seconds
+            viewer.wait_for_timeout(75)
+            f, spin, q = viewer.evaluate("(c => [+c.dataset.frame, c.dataset.spin, c.dataset.quality])(document.querySelector('#stage canvas'))")
+            seen.add(f); stale += spin != "preloaded"
+            assert f // 60 == row                                                           # it stays on the same height
+        assert len(seen) >= 8 and stale == 0, (len(seen), stale)                            # it really moves, and every frame came from memory
+        assert q == "full"                                                                  # at full quality (this pack fits the memory budget)
+        viewer.click("#menuBtn"); viewer.click("#rotate")                                  # stop: the normal behaviour is back
+        viewer.wait_for_function("document.querySelector('#stage canvas').dataset.spin === ''", timeout=5000)
+        assert viewer.locator("#rotate").get_attribute("aria-pressed") == "false"
+        browser.close()
