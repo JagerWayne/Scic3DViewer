@@ -134,6 +134,7 @@ function updateExplode() {
 on('unit', 'change', () => stage.setUnit(val('unit'), +val('uscale') || 1));
 on('uscale', 'input', () => stage.setUnit(val('unit'), +val('uscale') || 1));
 on('clearDims', 'click', () => stage.clearDims());
+on('zup', 'click', () => { if (!stage.meshesAll().length) return toast('Load a model first'); stage.zUpToYUp(); toast('Model turned upright'); });
 on('merge', 'click', () => { if (need('assembly')) { stage.mergeAll(); toast('Merged into one mesh (textures are baked to vertex colors)'); } });
 
 on('bapply', 'click', () => stage.setBase({ shape: val('bshape'), radius: +val('bradius'), height: +val('bheight'), finish: val('bfinish') }));

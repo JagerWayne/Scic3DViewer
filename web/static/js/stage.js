@@ -124,6 +124,7 @@ export class Stage extends EventTarget {
     else if (ext === 'step' || ext === 'stp') obj = await this._loadStep(buf);
     else if (ext === 'stl') obj = new THREE.Mesh(new STLLoader().parse(buf), new THREE.MeshStandardMaterial({ color: 0xb0b8c4 }));
     else throw new Error('Unsupported format: .' + ext);
+    if (['stl', 'step', 'stp', '3mf'].includes(ext)) obj.rotation.x = -Math.PI / 2; // CAD formats have Z up, the stage has Y up
     return this.addModel(obj, file.name);
   }
   async _loadStep(buf) { // CAD import: STEP is converted in the browser by OpenCascade (WASM, loaded from the CDN on first use)
@@ -287,6 +288,14 @@ export class Stage extends EventTarget {
     o.parent.remove(o); this._clearP0(); this.setExplode(this.state.explode); this.emit('tree'); this.emit('change');
   }
   rename(o, n) { o.name = n; this.emit('tree'); }
+  zUpToYUp() { // for files whose Z axis points up (CAD exports, some OBJ): turn the model -90 degrees about X and stand it on the floor
+    const X = new V3(1, 0, 0), a = -Math.PI / 2;
+    this.assembly.children.forEach(c => { c.position.applyAxisAngle(X, a); c.rotateOnWorldAxis(X, a); });
+    this.assembly.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.assembly);
+    if (!box.isEmpty()) this.assembly.children.forEach(c => (c.position.y -= box.min.y));
+    this._clearP0(); this.setExplode(this.state.explode); this.frame(); this.emit('tree'); this.emit('change');
+  }
   mergeAll() {
     const ms = this.meshes(); if (!ms.length) return;
     this.unsolo(); this.setExplode(0); this.select(null); this.assembly.updateMatrixWorld(true);

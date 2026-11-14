@@ -354,3 +354,32 @@ def test_image_viewer_uses_previews_while_moving_and_never_goes_blank(server):
             viewer.wait_for_timeout(60 if i % 3 else 330)
             assert painted() > .05, i
         browser.close()
+
+
+def stl_box(sx, sy, sz):  # a box of the given size, as STL text
+    v = [(x * sx, y * sy, z * sz) for x, y, z in VERTS]
+    return "solid b\n" + "".join("facet normal 0 0 0\nouter loop\n" + "".join("vertex %s %s %s\n" % v[i] for i in f) + "endloop\nendfacet\n" for f in FACETS) + "endsolid\n"
+
+
+def test_z_up_files_stand_upright_and_the_button_fixes_other_files(server):
+    token = db.login_google("Z Up", "zup@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        page = browser.new_context(bypass_csp=True).new_page()
+        page.add_init_script(f"localStorage.setItem('scic_token','{token}')")
+        page.goto(BASE + "/studio")
+        page.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
+        size = lambda: page.evaluate("""() => { stage.assembly.updateMatrixWorld(true); const V = stage.camera.position.constructor, lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+            for (const m of stage.meshesAll()) { m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox;
+              for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) { const q = new V(x, y, z).applyMatrix4(m.matrixWorld);
+                [q.x, q.y, q.z].forEach((c, i) => { lo[i] = Math.min(lo[i], c); hi[i] = Math.max(hi[i], c); }); } }
+            return [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], lo[1]]; }""")
+        # a post that is 3 long along Z in the file: it must stand up (tallest along Y) and rest on the floor
+        page.set_input_files("#file", {"name": "post.stl", "mimeType": "model/stl", "buffer": stl_box(1, 1, 3).encode()})
+        page.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
+        dx, dy, dz, floor = size()
+        assert dy > dx * 1.5 and dy > dz * 1.5 and abs(floor) < 1e-3, (dx, dy, dz, floor)
+        page.click("#zup")                                                               # for other formats: one click lays it down again (Z becomes Y)
+        dx, dy, dz, floor = size()
+        assert dz > dy * 1.5 and abs(floor) < 1e-3, (dx, dy, dz, floor)
+        browser.close()
