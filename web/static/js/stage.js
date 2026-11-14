@@ -643,6 +643,9 @@ export class Stage extends EventTarget {
     const mime = webp ? 'image/webp' : 'image/jpeg';
     const elevs = Array.from({ length: el }, (_, i) => (el === 1 ? (elMin + elMax) / 2 : elMin + (elMax - elMin) * i / (el - 1)));
     const blobs = [], anno = [];
+    const meshes = [...this.meshes(), ...(() => { const a = []; this.base.traverseVisible(o => o.isMesh && a.push(o)); return a; })()];
+    const ray = new THREE.Raycaster(), eps = this.size() * .004;
+    const occlude = this.triCount() * az * el * this.annotations.length <= 1.5e9; // ray tests are slow on huge models: then only the facing test is used
     r.setAnimationLoop(null); this.fly = null; this.controls.enabled = false; this._helpers(false);
     this.dim = 1; this.spotLight.intensity = 0; this.lights.forEach(l => (l.intensity = l.userData.base * this.state.light));
     if (!webp) r.setClearColor(new THREE.Color(BACKDROP_FLAT[this.state.backdrop] || '#0f172a'), 1); // JPEG has no transparency
@@ -655,9 +658,12 @@ export class Stage extends EventTarget {
         tgt.copy(c); cam.lookAt(c); cam.updateMatrixWorld();
         r.render(this.scene, cam);
         blobs.push(await new Promise(ok => r.domElement.toBlob(ok, mime, quality)));
-        anno.push(this.annotations.map(n => { // [x, y, 1 when the callout faces the camera]
-          const p = new V3(...n.point), v = cam.position.clone().sub(p).normalize(), q = p.clone().project(cam);
-          return [+((q.x + 1) / 2).toFixed(3), +((1 - q.y) / 2).toFixed(3), +(q.z < 1 && v.dot(new V3(...n.normal)) > .05)];
+        anno.push(this.annotations.map(n => { // [x, y, visibility 0..1]: 0 when on the far side, behind other geometry or off screen
+          const p = new V3(...n.point), toCam = cam.position.clone().sub(p), d = toCam.length(), v = toCam.clone().divideScalar(d), q = p.clone().project(cam);
+          let f = Math.max(0, v.dot(new V3(...n.normal)));                                    // how squarely the surface faces the camera
+          if (q.z >= 1 || Math.abs(q.x) > 1 || Math.abs(q.y) > 1) f = 0;
+          if (f > 0 && occlude) { ray.set(p.clone().addScaledVector(v, eps), v); ray.far = d - eps; if (ray.intersectObjects(meshes, false).length) f = 0; }
+          return [+((q.x + 1) / 2).toFixed(3), +((1 - q.y) / 2).toFixed(3), +f.toFixed(2)];
         }));
         onProgress?.((e * az + a + 1) / (az * el), blobs[blobs.length - 1]);
       }

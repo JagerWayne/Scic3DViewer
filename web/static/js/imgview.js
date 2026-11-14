@@ -27,6 +27,13 @@ export async function run(p, get, fail) {
   const ctx = cv.getContext('2d');
   const chips = annos.map((a, i) => { const e = Object.assign(document.createElement('div'), { className: 'lbl callout', textContent: `${i + 1}. ${a.text}` }); e.onclick = () => showAnno(i); labels.append(e); return e; });
 
+  const SEEN = .25; // a tag counts as visible when its surface faces the camera at least this much (old packs store 0 or 1)
+  let calloutsOn = true;
+  if (annos.length) { // viewers can hide the tags
+    const tb = Object.assign(document.createElement('button'), { className: 'btn on', textContent: 'Callouts', title: 'Show or hide the callout tags' });
+    tb.onclick = () => { calloutsOn = !calloutsOn; tb.classList.toggle('on', calloutsOn); dirty = true; };
+    $('#rotate').before(tb);
+  }
   // start on the angle the creator was looking from
   const cam = cfg.camera; let A = 0, E = (el - 1) / 2;
   if (cam) {
@@ -78,7 +85,7 @@ export async function run(p, get, fail) {
     drawMark();
     const k = cv.clientWidth / cv.width, fa = ix.anno?.[i] || [];
     chips.forEach((c, j) => {
-      const a = fa[j]; c.hidden = !a || !a[2] || !b;
+      const a = fa[j]; c.hidden = !calloutsOn || !a || a[2] < SEEN || !b;
       if (a) c.style.transform = `translate(${(ox + a[0] * w * s) * k}px,${(oy + a[1] * h * s) * k}px) translate(-50%,-130%)`;
     });
   }
@@ -108,8 +115,10 @@ export async function run(p, get, fail) {
   // callout click: turn to the picture where that callout faces the camera, closest to the centre
   function showAnno(i) {
     let best = -1, bs = -1;
-    (ix.anno || []).forEach((fa, f) => { const a = fa[i]; if (a && a[2]) { const s = 1 - Math.abs(a[0] - .5) - Math.abs(a[1] - .5) * .5; if (s > bs) { bs = s; best = f; } } });
+    // the picture where the tag faces the camera squarely and sits near the middle (never one where it is on the far side)
+    (ix.anno || []).forEach((fa, f) => { const a = fa[i]; if (a && a[2] >= SEEN) { const s = a[2] + (1 - Math.abs(a[0] - .5) - Math.abs(a[1] - .5) * .5) * .6; if (s > bs) { bs = s; best = f; } } });
     if (best < 0) return toast('This point is not visible from the pictured angles');
+    zoom = 1; px = py = 0;
     let dA = (best % az) - (((A % az) + az) % az); if (dA > az / 2) dA -= az; if (dA < -az / 2) dA += az;
     anim = { t0: performance.now(), A0: A, E0: E, dA, dE: Math.floor(best / az) - E };
   }

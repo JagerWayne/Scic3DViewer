@@ -280,3 +280,32 @@ def test_free_image_link_draws_the_watermark(server):
         assert corner > 0.005
         assert not errors, errors
         browser.close()
+
+
+def test_image_link_callouts_toggle_and_a_click_turns_to_the_tag(server):
+    db.create_license("Call Out", "callout@x.com", "ENTERPRISE", "30d")
+    token = db.login_google("Call Out", "callout@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        studio = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}).new_page()
+        studio.add_init_script(f"localStorage.setItem('scic_token','{token}')")
+        studio.goto(BASE + "/studio")
+        studio.wait_for_function("document.querySelector('#tier').textContent !== ''", timeout=30000)
+        studio.set_input_files("#file", {"name": "cube.stl", "mimeType": "model/stl", "buffer": CUBE_STL.encode()})
+        studio.wait_for_function("window.stage?.triCount?.() === 12", timeout=30000)
+        # a callout on the +Z face of the 2x2x2 cube; the camera starts at 45 degrees, so it is seen only at an angle
+        studio.evaluate("() => { stage.annotations.push({ text: 'Front', point: [0, 1, 1], normal: [0, 0, 1], cam: [1, 1, 3], target: [0, 1, 0] }); stage.buildAnnos(); }")
+        url = run_wizard(studio, custom=SMALL)
+        viewer = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page()
+        viewer.goto(url)
+        viewer.wait_for_selector(".callout:not([hidden])", timeout=30000)
+        viewer.click("button:has-text('Callouts')")                                       # viewers can hide the tags
+        viewer.wait_for_selector(".callout", state="hidden", timeout=5000)
+        viewer.click("button:has-text('Callouts')")
+        viewer.wait_for_selector(".callout", state="visible", timeout=5000)
+        viewer.click(".callout")                                                          # turns to the picture where the tag faces us
+        viewer.wait_for_timeout(1200)
+        box = viewer.locator(".callout").bounding_box(); cv = viewer.locator("#stage canvas").bounding_box()
+        assert viewer.locator(".callout").is_visible()                                    # never ends up on the far side
+        assert abs(box["x"] + box["width"] / 2 - (cv["x"] + cv["width"] / 2)) < 40        # and sits in the middle
+        browser.close()
