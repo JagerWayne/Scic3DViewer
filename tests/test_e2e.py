@@ -330,3 +330,27 @@ def test_image_link_rotates_when_zoomed_and_has_front_side_presets(server):
         viewer.click("button:has-text('Front')"); viewer.wait_for_timeout(1200)
         assert frame() == 0
         browser.close()
+
+
+def test_image_viewer_uses_previews_while_moving_and_never_goes_blank(server):
+    db.create_license("Fast F", "fast@x.com", "ENTERPRISE", "30d")
+    token = db.login_google("Fast F", "fast@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        url = publish_images(browser, token, dict(iAz=30, iEl=4, iPx=256, iQ=60, iElMin=10, iElMax=45))   # 120 pictures, more than the caches hold
+        viewer = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page()
+        viewer.goto(url)
+        viewer.wait_for_function("document.querySelector('#stage canvas')?.dataset.quality === 'full'", timeout=30000)   # at rest: the full picture
+        painted = lambda: viewer.evaluate("""() => { const c = document.querySelector('#stage canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+            let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n / (c.width * c.height); }""")
+        assert painted() > .05
+        viewer.evaluate("() => { window.__q = new Set(); setInterval(() => __q.add(document.querySelector('#stage canvas').dataset.quality), 15); }")
+        viewer.mouse.move(200, 350); viewer.mouse.down(); viewer.mouse.move(700, 350, steps=25); viewer.mouse.up()
+        viewer.wait_for_timeout(1000)
+        assert "low" in viewer.evaluate("[...window.__q]")                                # previews were used while moving
+        viewer.wait_for_function("document.querySelector('#stage canvas').dataset.quality === 'full'", timeout=8000)   # and the full picture came back once it rested
+        for i in range(24):                                                               # many fast turns and rests: the picture never vanishes
+            viewer.mouse.move(150 + 20 * (i % 5), 350); viewer.mouse.down(); viewer.mouse.move(750 - 30 * (i % 4), 330, steps=6); viewer.mouse.up()
+            viewer.wait_for_timeout(60 if i % 3 else 330)
+            assert painted() > .05, i
+        browser.close()

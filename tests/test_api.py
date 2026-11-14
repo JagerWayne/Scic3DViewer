@@ -508,3 +508,19 @@ def test_monthly_link_limit_per_tier(monkeypatch):
 
 def share_id_of(h):
     return c.get("/api/projects", headers=h).json()[0]["share_id"]
+
+
+def test_pack_with_preview_pictures_is_validated():
+    def pack(az=4, el=1, thumbs="ok"):
+        n, off = az * el, 0
+        frames = [[i * 5, 5] for i in range(n)]
+        th = [[n * 5 + i * 3, 3] for i in range(n)]
+        if thumbs == "short": th = th[:-1]
+        if thumbs == "outside": th[0] = [10_000, 3]
+        ix = json.dumps({"v": 1, "mime": "image/webp", "w": 64, "h": 64, "az": az, "el": el, "frames": frames, "thumbs": th, "anno": None}).encode()
+        return b"S3IM" + len(ix).to_bytes(4, "little") + ix + b"1" * (n * 5) + b"2" * (n * 3)
+    h = pro("thumb@x.com")
+    assert share_images(h, pack=pack()).status_code == 200                           # previews are accepted
+    assert share_images(h, pack=mkpack()).status_code == 200                         # older packs without previews still are
+    assert share_images(h, pack=pack(thumbs="short")).status_code == 400
+    assert share_images(h, pack=pack(thumbs="outside")).status_code == 400

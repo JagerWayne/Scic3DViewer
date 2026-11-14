@@ -44,48 +44,59 @@ export async function run(p, get, fail) {
   }
   const frameAt = () => ((Math.round(A) % az) + az) % az + Math.max(0, Math.min(el - 1, Math.round(E))) * az;
 
-  // decoded frames, least recently used dropped first
-  const cache = new Map(), pending = new Set(); let last = null, dirty = true;
-  const want = i => {
-    if (cache.has(i)) { const b = cache.get(i); cache.delete(i); cache.set(i, b); return b; }
-    if (!pending.has(i) && i >= 0 && i < az * el) {
-      pending.add(i); const [o, len] = ix.frames[i];
+  // Two qualities: a small preview (320 px) is drawn while the view moves; once it has rested on one picture for FULL_AFTER ms
+  // the full picture is decoded and drawn. Packs made before previews existed simply use the full pictures.
+  const FULL_AFTER = 250, hasThumbs = Array.isArray(ix.thumbs) && ix.thumbs.length === az * el;
+  const lru = cap => ({ map: new Map(), pending: new Set(), cap }), tc = lru(96), fc = lru(hasThumbs ? 12 : CACHE);
+  let last = null, lastQ = '', dirty = true, curI = -1, lastChange = 0, fired = false, fullShown = false;
+  const decode = (c, list, i) => { // decoded pictures live in a small least-recently-used cache (a whole pack decoded would need gigabytes)
+    const hit = c.map.get(i); if (hit) { c.map.delete(i); c.map.set(i, hit); return hit; }
+    if (!c.pending.has(i) && i >= 0 && i < az * el) {
+      c.pending.add(i); const [o, len] = list[i];
       createImageBitmap(pack.slice(base + o, base + o + len, ix.mime)).then(b => {
-        cache.set(i, b); pending.delete(i); dirty = true;
-        while (cache.size > CACHE) { const k = cache.keys().next().value; cache.get(k).close?.(); cache.delete(k); }
-      }).catch(() => pending.delete(i));
+        c.map.set(i, b); c.pending.delete(i); dirty = true;
+        for (const [k, v] of c.map) { if (c.map.size <= c.cap) break; if (v !== last) { v.close?.(); c.map.delete(k); } } // never close the picture on screen
+      }).catch(() => c.pending.delete(i));
     }
     return null;
   };
 
   let zoom = 1, px = 0, py = 0; // zoom about the centre (wheel or pinch), pan while zoomed
+  const DPR = () => Math.min(devicePixelRatio || 1, 2); // phones report 3: drawing at 3x only costs speed
   const fit = () => Math.min(cv.width / w, cv.height / h) * zoom;
-  const drawMark = () => {
-    if (!wm) return;
-    const W = cv.width, H = cv.height, fs = Math.max(13, Math.round(Math.min(W, H) / 24));
-    ctx.save(); ctx.font = `700 ${fs}px system-ui,sans-serif`; ctx.textBaseline = 'middle';
-    if (wm.cross) { ctx.strokeStyle = 'rgba(255,255,255,.2)'; ctx.lineWidth = Math.max(1, fs / 12); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, H); ctx.moveTo(W, 0); ctx.lineTo(0, H); ctx.stroke(); }
+  let markCv = null; // the watermark is painted once per canvas size, then copied on every frame
+  const buildMark = () => {
+    const W = cv.width, H = cv.height, m = Object.assign(document.createElement('canvas'), { width: W, height: H }), x = m.getContext('2d'), fs = Math.max(13, Math.round(Math.min(W, H) / 24));
+    x.font = `700 ${fs}px system-ui,sans-serif`; x.textBaseline = 'middle';
+    if (wm.cross) { x.strokeStyle = 'rgba(255,255,255,.2)'; x.lineWidth = Math.max(1, fs / 12); x.beginPath(); x.moveTo(0, 0); x.lineTo(W, H); x.moveTo(W, 0); x.lineTo(0, H); x.stroke(); }
     if (wm.tile) {
-      ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 3; ctx.textAlign = 'center';
-      ctx.translate(W / 2, H / 2); ctx.rotate(-Math.PI / 7); const step = fs * 4, span = Math.hypot(W, H);
-      for (let y = -span; y < span; y += step) for (let x = -span; x < span; x += ctx.measureText(wm.text).width + fs * 3) ctx.fillText(wm.text, x, y);
+      x.fillStyle = 'rgba(255,255,255,.2)'; x.shadowColor = 'rgba(0,0,0,.35)'; x.shadowBlur = 3; x.textAlign = 'center';
+      x.translate(W / 2, H / 2); x.rotate(-Math.PI / 7); const step = fs * 4, span = Math.hypot(W, H), tw = x.measureText(wm.text).width + fs * 3;
+      for (let y = -span; y < span; y += step) for (let xx = -span; xx < span; xx += tw) x.fillText(wm.text, xx, y);
     } else if (wm.text) {
-      ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 4; ctx.textAlign = 'right'; ctx.fillText(wm.text, W - fs, H - fs);
+      x.fillStyle = 'rgba(255,255,255,.8)'; x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = 4; x.textAlign = 'right'; x.fillText(wm.text, W - fs, H - fs);
     }
-    ctx.restore();
+    return m;
   };
-  function draw() {
-    const i = frameAt(), b = want(i) || last; cv.dataset.frame = i;
-    if (b) last = b;
-    for (const d of [1, -1, 2, -2]) want((((i % az) + d + az) % az) + Math.floor(i / az) * az); // neighbours around the ring
-    if (frameAt() >= az) want(i - az); if (frameAt() < az * (el - 1)) want(i + az);
+  function draw(now) {
+    const i = frameAt(); cv.dataset.frame = i;
+    if (i !== curI) { curI = i; lastChange = now; fired = false; }   // a new picture: back to previews until it rests
+    const settled = now - lastChange >= FULL_AFTER;
+    let b = null, q = 'low';
+    if (settled || !hasThumbs) { b = decode(fc, ix.frames, i); if (b) q = 'full'; }
+    if (!b && hasThumbs) b = decode(tc, ix.thumbs, i);
+    const near = []; for (const d of [1, -1, 2, -2]) near.push((((i % az) + d + az) % az) + Math.floor(i / az) * az); // neighbours around the ring
+    if (i >= az) near.push(i - az); if (i < az * (el - 1)) near.push(i + az);
+    near.forEach(n => (hasThumbs ? decode(tc, ix.thumbs, n) : decode(fc, ix.frames, n)));
+    if (b) { last = b; lastQ = q; }
+    fullShown = lastQ === 'full' && (settled || !hasThumbs); cv.dataset.quality = lastQ;
     ctx.clearRect(0, 0, cv.width, cv.height);
     const s = fit(), ox = (cv.width - w * s) / 2 + px, oy = (cv.height - h * s) / 2 + py;
-    if (last) ctx.drawImage(last, ox, oy, w * s, h * s);
-    drawMark();
+    if (last) { try { ctx.drawImage(last, ox, oy, w * s, h * s); } catch { last = null; dirty = true; } } // a bad picture must not blank the view
+    if (wm) ctx.drawImage(markCv ||= buildMark(), 0, 0);
     const k = cv.clientWidth / cv.width, fa = ix.anno?.[i] || [];
     chips.forEach((c, j) => {
-      const a = fa[j]; c.hidden = !calloutsOn || !a || a[2] < SEEN || !b;
+      const a = fa[j]; c.hidden = !calloutsOn || !a || a[2] < SEEN || !last;
       if (a) c.style.transform = `translate(${(ox + a[0] * w * s) * k}px,${(oy + a[1] * h * s) * k}px) translate(-50%,-130%)`;
     });
   }
@@ -99,10 +110,10 @@ export async function run(p, get, fail) {
     const dx = e.clientX - o[0], dy = e.clientY - o[1]; ptrs.set(e.pointerId, [e.clientX, e.clientY]);
     if (ptrs.size === 2) {
       const [a, c] = [...ptrs.values()], d = Math.hypot(a[0] - c[0], a[1] - c[1]); if (pinch) { zoom *= d / pinch; clampZoom(); } pinch = d;
-      if (zoom > 1.01) { px += dx * devicePixelRatio / 2; py += dy * devicePixelRatio / 2; dirty = true; } // two fingers moving together pan
+      if (zoom > 1.01) { px += dx * DPR() / 2; py += dy * DPR() / 2; dirty = true; } // two fingers moving together pan
       return;
     }
-    if (zoom > 1.01 && (e.shiftKey || e.buttons & 6)) { px += dx * devicePixelRatio; py += dy * devicePixelRatio; dirty = true; return; } // pan: Shift, right or middle button
+    if (zoom > 1.01 && (e.shiftKey || e.buttons & 6)) { px += dx * DPR(); py += dy * DPR(); dirty = true; return; } // pan: Shift, right or middle button
     vA = -dx * az * .75 / cv.clientWidth; vE = dy * (el - 1) * 1.2 / cv.clientHeight; A += vA; E = Math.max(0, Math.min(el - 1, E + vE)); dirty = true;
   });
   const up = e => { ptrs.delete(e.pointerId); pinch = 0; cv.style.cursor = 'grab'; };
@@ -136,7 +147,7 @@ export async function run(p, get, fail) {
     }
   }
 
-  const fitCanvas = () => { cv.width = Math.round(cv.clientWidth * devicePixelRatio) || 1; cv.height = Math.round(cv.clientHeight * devicePixelRatio) || 1; dirty = true; };
+  const fitCanvas = () => { cv.width = Math.round(cv.clientWidth * DPR()) || 1; cv.height = Math.round(cv.clientHeight * DPR()) || 1; markCv = null; dirty = true; };
   new ResizeObserver(fitCanvas).observe(box); fitCanvas();
   let t = performance.now();
   (function loop(now) {
@@ -144,7 +155,8 @@ export async function run(p, get, fail) {
     if (anim) { const k = Math.min(1, (now - anim.t0) / 700), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; A = anim.A0 + anim.dA * e; E = anim.E0 + anim.dE * e; if (k >= 1) anim = null; dirty = true; }
     else if (!ptrs.size && (Math.abs(vA) > .002 || Math.abs(vE) > .002)) { A += vA; E = Math.max(0, Math.min(el - 1, E + vE)); vA *= .93; vE *= .8; dirty = true; } // inertia after release
     if (auto && !ptrs.size) { A += az * dt / 12; dirty = true; }
-    if (dirty) { dirty = false; draw(); }
+    if (!fired && curI >= 0 && !fullShown && now - lastChange >= FULL_AFTER) { fired = true; dirty = true; } // rested on one picture: load the full one
+    if (dirty) { dirty = false; draw(now); }
     requestAnimationFrame(loop);
   })(t);
 

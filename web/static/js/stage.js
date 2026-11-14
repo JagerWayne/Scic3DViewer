@@ -642,7 +642,8 @@ export class Stage extends EventTarget {
     const webp = (await new Promise(ok => probe.toBlob(b => ok(b?.type), 'image/webp'))) === 'image/webp'; // Safari cannot encode WebP
     const mime = webp ? 'image/webp' : 'image/jpeg';
     const elevs = Array.from({ length: el }, (_, i) => (el === 1 ? (elMin + elMax) / 2 : elMin + (elMax - elMin) * i / (el - 1)));
-    const blobs = [], anno = [];
+    const blobs = [], anno = [], thumbs = [], TS = Math.min(320, px);  // 320 px previews the viewer shows while the view is moving
+    const tcv = Object.assign(document.createElement('canvas'), { width: TS, height: TS }), tctx = tcv.getContext('2d');
     const meshes = [...this.meshes(), ...(() => { const a = []; this.base.traverseVisible(o => o.isMesh && a.push(o)); return a; })()];
     const ray = new THREE.Raycaster(), eps = this.size() * .004;
     const occlude = this.triCount() * az * el * this.annotations.length <= 1.5e9; // ray tests are slow on huge models: then only the facing test is used
@@ -658,6 +659,8 @@ export class Stage extends EventTarget {
         tgt.copy(c); cam.lookAt(c); cam.updateMatrixWorld();
         r.render(this.scene, cam);
         blobs.push(await new Promise(ok => r.domElement.toBlob(ok, mime, quality)));
+        tctx.clearRect(0, 0, TS, TS); tctx.drawImage(r.domElement, 0, 0, TS, TS);
+        thumbs.push(await new Promise(ok => tcv.toBlob(ok, mime, .72)));
         anno.push(this.annotations.map(n => { // [x, y, visibility 0..1]: 0 when on the far side, behind other geometry or off screen
           const p = new V3(...n.point), toCam = cam.position.clone().sub(p), d = toCam.length(), v = toCam.clone().divideScalar(d), q = p.clone().project(cam);
           let f = Math.max(0, v.dot(new V3(...n.normal)));                                    // how squarely the surface faces the camera
@@ -672,7 +675,7 @@ export class Stage extends EventTarget {
       r.setClearColor(0x000000, 0); r.setPixelRatio(keep.pr); this._resize(); this._helpers(true); this.controls.enabled = true;
       r.setAnimationLoop(() => this._loop());
     }
-    return { blobs, anno, mime, w: px, h: px, az, el, elevs };
+    return { blobs, thumbs, anno, mime, w: px, h: px, az, el, elevs };
   }
   getConfig() {
     const s = this.state;

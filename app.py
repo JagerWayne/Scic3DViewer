@@ -195,6 +195,8 @@ async def _save_pack(up: UploadFile, dest: Path, im: dict):
         assert ix["mime"] in ("image/webp", "image/jpeg") and len(ix["frames"]) == az * el
         assert all(o >= 0 and ln > 0 and o + ln <= data for o, ln in ix["frames"])
         assert ix.get("anno") is None or len(ix["anno"]) == az * el
+        th = ix.get("thumbs")  # small preview pictures, optional (older packs have none)
+        assert th is None or (len(th) == az * el and all(o >= 0 and ln > 0 and o + ln <= data for o, ln in th))
     except Exception:
         raise HTTPException(400, "Invalid image pack, or it is above the limits of your tier")
 

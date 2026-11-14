@@ -83,6 +83,8 @@ The server enforces the limits and the watermark; the browser cannot choose them
 | Watermark | forced text + faint cross | none | optional own text |
 | Model download on the link | no | GLB | GLB |
 
+The pack also holds a 320 px preview of every picture: the viewer draws those while you drag or spin (smooth on phones) and swaps in the full picture after 250 ms on the same angle. Links published before this change keep working but only get the speed-ups that need no republishing.
+
 Measure, exploded view and part visibility are not available on picture links. Pictures can still be screenshotted.
 
 The server checks size, callout count, share permissions, and custom `.hdr` uploads. Editing tools (slicer, paint fill,

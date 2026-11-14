@@ -247,7 +247,7 @@ function imgParams() {
            elMin: cl(P.elMin, -60, 85), elMax: cl(P.elMax, -60, 85) };
 }
 function imgInfo() {
-  const P = imgParams(), mb = P.az * P.el * P.px * P.px * 0.09 * (P.q / 80) / 1e6;
+  const P = imgParams(), mb = P.az * P.el * P.px * P.px * 0.1 * (P.q / 80) / 1e6;  // +10% for the small preview pictures
   $('#iInfo').textContent = `${P.az} × ${P.el} = ${P.az * P.el} pictures of ${P.px}px, about ${mb.toFixed(0)} MB (estimate). ` +
     (me.images.watermark === 'forced' ? 'Free links carry a watermark and a faint cross.' : '');
 }
@@ -266,10 +266,11 @@ on('iCancel', 'click', () => { cancelPack = true; });
 async function buildPack(P, onFrame) { // 'S3IM' + u32 index length + JSON index + the pictures, in one file
   const t = await stage.renderTurntable({ az: P.az, el: P.el, elMin: P.elMin, elMax: Math.max(P.elMin, P.elMax), px: P.px, quality: P.q / 100,
     cancelled: () => cancelPack, onProgress: onFrame });
-  let off = 0; const frames = t.blobs.map(b => { const f = [off, b.size]; off += b.size; return f; });
-  const ix = new TextEncoder().encode(JSON.stringify({ v: 1, mime: t.mime, w: t.w, h: t.h, az: t.az, el: t.el, elevs: t.elevs, frames, anno: stage.annotations.length ? t.anno : null }));
+  let off = 0; const place = list => list.map(b => { const f = [off, b.size]; off += b.size; return f; });
+  const frames = place(t.blobs), thumbs = place(t.thumbs);
+  const ix = new TextEncoder().encode(JSON.stringify({ v: 1, mime: t.mime, w: t.w, h: t.h, az: t.az, el: t.el, elevs: t.elevs, frames, thumbs, anno: stage.annotations.length ? t.anno : null }));
   const head = new Uint8Array(8); head.set([83, 51, 73, 77]); new DataView(head.buffer).setUint32(4, ix.length, true);
-  const pack = new Blob([head, ix, ...t.blobs]);
+  const pack = new Blob([head, ix, ...t.blobs, ...t.thumbs]);
   if (pack.size > me.images.max_mb * MB) throw new Error(`The pictures are ${(pack.size / MB).toFixed(0)} MB, over the ${me.images.max_mb} MB limit of the ${me.tier} tier. Choose a lower quality.`);
   return pack;
 }
