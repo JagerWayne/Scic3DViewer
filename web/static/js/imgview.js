@@ -75,7 +75,7 @@ export async function run(p, get, fail) {
     ctx.restore();
   };
   function draw() {
-    const i = frameAt(), b = want(i) || last;
+    const i = frameAt(), b = want(i) || last; cv.dataset.frame = i;
     if (b) last = b;
     for (const d of [1, -1, 2, -2]) want((((i % az) + d + az) % az) + Math.floor(i / az) * az); // neighbours around the ring
     if (frameAt() >= az) want(i - az); if (frameAt() < az * (el - 1)) want(i + az);
@@ -98,13 +98,16 @@ export async function run(p, get, fail) {
     const o = ptrs.get(e.pointerId); if (!o) return;
     const dx = e.clientX - o[0], dy = e.clientY - o[1]; ptrs.set(e.pointerId, [e.clientX, e.clientY]);
     if (ptrs.size === 2) {
-      const [a, c] = [...ptrs.values()], d = Math.hypot(a[0] - c[0], a[1] - c[1]); if (pinch) { zoom *= d / pinch; clampZoom(); } pinch = d; return;
+      const [a, c] = [...ptrs.values()], d = Math.hypot(a[0] - c[0], a[1] - c[1]); if (pinch) { zoom *= d / pinch; clampZoom(); } pinch = d;
+      if (zoom > 1.01) { px += dx * devicePixelRatio / 2; py += dy * devicePixelRatio / 2; dirty = true; } // two fingers moving together pan
+      return;
     }
-    if (zoom > 1.01) { px += dx * devicePixelRatio; py += dy * devicePixelRatio; dirty = true; return; }
+    if (zoom > 1.01 && (e.shiftKey || e.buttons & 6)) { px += dx * devicePixelRatio; py += dy * devicePixelRatio; dirty = true; return; } // pan: Shift, right or middle button
     vA = -dx * az * .75 / cv.clientWidth; vE = dy * (el - 1) * 1.2 / cv.clientHeight; A += vA; E = Math.max(0, Math.min(el - 1, E + vE)); dirty = true;
   });
   const up = e => { ptrs.delete(e.pointerId); pinch = 0; cv.style.cursor = 'grab'; };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('contextmenu', e => e.preventDefault());
   cv.addEventListener('wheel', e => { e.preventDefault(); zoom *= e.deltaY < 0 ? 1.1 : 1 / 1.1; clampZoom(); }, { passive: false });
   cv.addEventListener('keydown', e => {
     const m = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!m) return;
@@ -119,8 +122,18 @@ export async function run(p, get, fail) {
     (ix.anno || []).forEach((fa, f) => { const a = fa[i]; if (a && a[2] >= SEEN) { const s = a[2] + (1 - Math.abs(a[0] - .5) - Math.abs(a[1] - .5) * .5) * .6; if (s > bs) { bs = s; best = f; } } });
     if (best < 0) return toast('This point is not visible from the pictured angles');
     zoom = 1; px = py = 0;
-    let dA = (best % az) - (((A % az) + az) % az); if (dA > az / 2) dA -= az; if (dA < -az / 2) dA += az;
-    anim = { t0: performance.now(), A0: A, E0: E, dA, dE: Math.floor(best / az) - E };
+    turnTo(best % az, Math.floor(best / az));
+  }
+  function turnTo(a, e) { // smooth turn to picture column `a` and height `e`, by the shortest way round; also resets zoom
+    let dA = a - (((A % az) + az) % az); if (dA > az / 2) dA -= az; if (dA < -az / 2) dA += az;
+    anim = { t0: performance.now(), A0: A, E0: E, dA, dE: e - E }; zoom = 1; px = py = 0; auto = false; $('#rotate').classList.remove('on'); dirty = true;
+  }
+  { // camera presets: Front looks along -Z (glTF front), Side from +X; the height closest to level
+    const lvl = (ix.elevs || []).reduce((b, v, k, all) => (Math.abs(v) < Math.abs(all[b]) ? k : b), 0);
+    for (const [name, col] of [['Front', 0], ['Side', Math.round(az / 4)]]) {
+      const b = Object.assign(document.createElement('button'), { className: 'btn', textContent: name, title: name + ' view' });
+      b.onclick = () => turnTo(col, lvl); $('#rotate').before(b);
+    }
   }
 
   const fitCanvas = () => { cv.width = Math.round(cv.clientWidth * devicePixelRatio) || 1; cv.height = Math.round(cv.clientHeight * devicePixelRatio) || 1; dirty = true; };

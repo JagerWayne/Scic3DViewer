@@ -309,3 +309,24 @@ def test_image_link_callouts_toggle_and_a_click_turns_to_the_tag(server):
         assert viewer.locator(".callout").is_visible()                                    # never ends up on the far side
         assert abs(box["x"] + box["width"] / 2 - (cv["x"] + cv["width"] / 2)) < 40        # and sits in the middle
         browser.close()
+
+
+def test_image_link_rotates_when_zoomed_and_has_front_side_presets(server):
+    db.create_license("Zoom Z", "zoom@x.com", "ENTERPRISE", "30d")
+    token = db.login_google("Zoom Z", "zoom@x.com", "test")[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+        url = publish_images(browser, token, SMALL)                                      # 8 pictures around, 2 heights (10 and 40 degrees)
+        viewer = browser.new_context(bypass_csp=True, viewport={"width": 900, "height": 700}).new_page()
+        viewer.goto(url)
+        viewer.wait_for_function("document.querySelector('#stage canvas')?.dataset.frame !== undefined", timeout=30000)
+        frame = lambda: int(viewer.evaluate("document.querySelector('#stage canvas').dataset.frame"))
+        viewer.mouse.move(450, 350); viewer.mouse.wheel(0, -600); viewer.wait_for_timeout(300)   # zoom in
+        before = frame()
+        viewer.mouse.down(); viewer.mouse.move(750, 350, steps=12); viewer.mouse.up(); viewer.wait_for_timeout(900)
+        assert frame() != before                                                         # dragging still rotates while zoomed
+        viewer.click("button:has-text('Side')"); viewer.wait_for_timeout(1200)
+        assert frame() % 8 == 2 and frame() < 8                                          # a quarter turn from the front, lowest height
+        viewer.click("button:has-text('Front')"); viewer.wait_for_timeout(1200)
+        assert frame() == 0
+        browser.close()
