@@ -1,5 +1,5 @@
 """SQLite persistence + license/tier rules. Everything lives under SCIC_DATA (default ./data)."""
-import hashlib, os, re, secrets, sqlite3, time
+import calendar, hashlib, os, re, secrets, sqlite3, time
 from pathlib import Path
 
 DATA = Path(os.environ.get("SCIC_DATA", Path(__file__).parent / "data"))
@@ -11,14 +11,14 @@ ADMIN_EMAIL = os.environ.get("SCIC_ADMIN_EMAIL", "waynescicluna.1985@gmail.com")
 
 # Server-side tier table: the single source of truth, also sent to the UI via /api/me.
 TIERS = {
-    "FREE": dict(max_mb=15, max_annotations=2, share_permissions=False, formats=[],
+    "FREE": dict(max_mb=15, max_shares_month=30, max_annotations=2, share_permissions=False, formats=[],
                  tools=["paint_basic"],
                  images=dict(presets=["light"], custom=False, watermark="forced", max_az=36, max_el=3, max_px=800, max_mb=12)),
-    "PRO": dict(max_mb=100, max_annotations=None, share_permissions=True, formats=["glb"],
+    "PRO": dict(max_mb=100, max_shares_month=150, max_annotations=None, share_permissions=True, formats=["glb"],
                 tools=["paint_basic", "paint_fill", "assembly", "tour", "slicer", "explode",
                        "decimate", "base", "hdri", "capture"],
                 images=dict(presets=["light", "standard"], custom=False, watermark="none", max_az=72, max_el=5, max_px=1024, max_mb=60)),
-    "ENTERPRISE": dict(max_mb=500, max_annotations=None, share_permissions=True,
+    "ENTERPRISE": dict(max_mb=500, max_shares_month=5000, max_annotations=None, share_permissions=True,
                        formats=["glb", "obj", "stl", "usdz"],
                        tools=["paint_basic", "paint_fill", "paint_undo", "assembly", "tour",
                               "slicer", "explode", "measure", "decimate", "base", "hdri", "capture", "cad_import"],
@@ -147,6 +147,17 @@ def effective_tier(lic) -> str:
     if lic["revoked"] or lic["paused_at"] or (lic["expires_at"] and lic["expires_at"] < time.time()):
         return "FREE"
     return lic["tier"]
+
+
+def shares_this_month(email: str) -> int:
+    """New links published by this person since the 1st of the (UTC) month. Updating a link in place and deleting one
+    do not change the count: it comes from the activity log, so deleting links cannot be used to publish more."""
+    t = time.gmtime()
+    start = calendar.timegm((t.tm_year, t.tm_mon, 1, 0, 0, 0))
+    ids = license_ids(email)
+    with connect() as c:
+        return c.execute(f"SELECT COUNT(*) FROM activity WHERE action='share' AND ts>=? AND license_id IN ({','.join('?' * len(ids))})",
+                         (start, *ids)).fetchone()[0]
 
 
 def log(license_id, action, ip="", detail=""):

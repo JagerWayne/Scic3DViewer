@@ -222,13 +222,16 @@ function goStep(n, err) {
   document.querySelectorAll('#tl .tl-dot').forEach((d, i) => { d.classList.toggle('done', i < n - 1); d.classList.toggle('now', i === n - 1); d.textContent = i < n - 1 ? '✓' : i + 1; });
   setFill((n - 1) / (STEPS.length - 1));
   show('sBack', (n > 1 && n < 5) || (n === 5 && !!err)); show('sNext', n < 5); show('iCancel', n === 5 && !err);
-  const note = me.tier === 'FREE' ? { 1: 'Passwords need the PRO tier.', 2: 'Model downloads need the PRO tier.', 4: 'Link expiry needs the PRO tier.' }[n] : '';
+  const left = me.max_shares_month - me.shares_month;
+  const note = (n === 1 ? `${me.shares_month} of ${me.max_shares_month} new links used this month${left <= 0 ? ' (limit reached)' : ''}. ` : '') +
+    (me.tier === 'FREE' ? { 1: 'Passwords need the PRO tier.', 2: 'Model downloads need the PRO tier.', 4: 'Link expiry needs the PRO tier.' }[n] || '' : '');
   $('#sNote').textContent = note || ''; show('sNote', !!note);
   show('sErr', !!err); if (err) $('#sErr').textContent = err;
 }
 on('share', 'click', () => {
   if (!stage.meshesAll().length) return toast('Load a model first');
   if (!me.drive_connected) { show('driveModal'); return toast('Connect your Google Drive to publish links'); }
+  if (!editing && me.shares_month >= me.max_shares_month) return toast(`Monthly limit reached (${me.max_shares_month} new links on the ${me.tier} tier). It resets on the 1st.`);
   for (const id of ['pDl', 'sUsePw', 'sExpiry']) $('#' + id).disabled = !me.share_permissions;
   $('#pDl').checked = $('#sUsePw').checked = false; $('#sPass').value = ''; show('sPassRow', false); $('#sExpiry').value = '0';
   $('#sTitle').value = editing ? editing.title : ''; $('#sTitle').placeholder = modelName || 'Untitled';
@@ -312,6 +315,7 @@ async function publish() { // step 5: draw the pictures (with a live preview), u
     const r = await call('/api/projects/share', { method: 'POST', body: fd });
     const url = location.origin + r.url; $('#sUrl').value = url;
     $('#sEmbed').value = `<iframe src="${url}" width="640" height="480" style="border:0" allow="fullscreen" allowfullscreen></iframe>`;
+    if (!editing || !$('#sUpdate').checked) me.shares_month++;
     goStep(6); showQr(url);
   } catch (e) { goStep(5, e.message === 'Cancelled' ? 'Cancelled. Go back to change the settings.' : e.message); }
   if (prev) URL.revokeObjectURL(prev);

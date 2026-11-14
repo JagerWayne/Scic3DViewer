@@ -67,6 +67,7 @@ python admin.py revoke  user@mail.com
 |---|---|---|---|
 | Upload / share size | 15 MB | 100 MB | 500 MB |
 | Callouts | 2 | unlimited | unlimited |
+| New links per month | 30 | 150 | 5000 |
 | Share permissions | view-only | download (GLB), explode | + ruler/caliper, GLB/OBJ/STL |
 
 ### 360° picture links (view-only)

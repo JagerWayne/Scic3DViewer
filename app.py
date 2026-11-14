@@ -70,7 +70,7 @@ def me_payload(u):
     return {"name": u["name"], "email": u["email"], "tier": u["tier"], "expires_at": u["expires_at"],
             "is_admin": u["is_admin"], "billing_available": billing.configured(),
             "drive_available": storage.configured(), "drive_connected": storage.connected(u["license_id"]),
-            **db.TIERS[u["tier"]]}
+            "shares_month": db.shares_this_month(u["email"]), **db.TIERS[u["tier"]]}
 
 
 # ---------- pages ----------
@@ -241,6 +241,8 @@ async def share(request: Request, model: UploadFile | None = File(None), config:
         raise HTTPException(409, "Connect your Google Drive first (Drive button in the top bar).")
     tier = db.TIERS[u["tier"]]
     old = owned_share(update_id, u) if update_id else None
+    if not old and db.shares_this_month(u["email"]) >= tier["max_shares_month"]:  # republishing an existing link is free
+        raise HTTPException(403, f"Monthly limit reached: the {u['tier']} tier allows {tier['max_shares_month']} new links per month. It resets on the 1st.")
     if len(config) > 256 * 1024:
         raise HTTPException(413, "scene config too large")
     try:

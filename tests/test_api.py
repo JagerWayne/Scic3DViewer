@@ -486,3 +486,25 @@ def test_picture_link_stores_the_model_only_when_downloads_are_allowed():
     assert c.post("/api/projects/share", headers=h, files={"pack": ("p.s3im", mkpack())}, data={"config": "{}"}).status_code == 400   # 3D links need it too
     sid2 = share_images(h, allow_download="true").json()["share_id"]
     assert next(p for p in c.get("/api/projects", headers=h).json() if p["share_id"] == sid2)["has_model"] is True
+
+
+def test_monthly_link_limit_per_tier(monkeypatch):
+    assert [db.TIERS[t]["max_shares_month"] for t in ("FREE", "PRO", "ENTERPRISE")] == [30, 150, 5000]
+    monkeypatch.setitem(db.TIERS["FREE"], "max_shares_month", 2)
+    h = login("quota@x.com")
+    first = share(h).json()["share_id"]
+    assert share(h).status_code == 200
+    assert c.get("/api/me", headers=h).json()["shares_month"] == 2
+    r = share(h)
+    assert r.status_code == 403 and "Monthly limit" in r.json()["detail"]
+    assert c.delete(f"/api/projects/{first}", headers=h).status_code == 200            # deleting a link does not give the quota back
+    assert share(h).status_code == 403
+    r = c.post("/api/projects/share", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", "update_id": share_id_of(h)})
+    assert r.status_code == 200                                                        # republishing an existing link is free
+    with db.connect() as con:                                                          # last month's links do not count
+        con.execute("UPDATE activity SET ts=ts-40*86400 WHERE action='share'")
+    assert share(h).status_code == 200
+
+
+def share_id_of(h):
+    return c.get("/api/projects", headers=h).json()[0]["share_id"]
