@@ -24,8 +24,11 @@ def server():
     mp.setattr(storage, "configured", lambda: True)
     mp.setattr(storage, "connected", lambda lid: True)
 
-    def upload(lid, p, name):
-        fid = f"{lid}:{name}:{next(ids)}"; cloud[fid] = p.read_bytes(); return fid
+    def upload(lid, p, name, progress=None):
+        fid = f"{lid}:{name}:{next(ids)}"; cloud[fid] = p.read_bytes()
+        if progress:
+            progress(len(cloud[fid]), len(cloud[fid]))
+        return fid
     mp.setattr(storage, "upload", upload)
     mp.setattr(storage, "stream", lambda lid, fid: iter([cloud[fid]]))
     mp.setattr(storage, "delete", lambda lid, fid: cloud.pop(fid, None))
@@ -78,6 +81,11 @@ def test_studio_publish_projects_and_viewer(server):
         studio.click("#sClose")
         url = run_wizard(studio, title="E2E model")
         assert "/v/" in url and "iframe" in studio.input_value("#sEmbed")
+        log = studio.eval_on_selector("#pvLog", "e => e.value")                           # the Processing step explained what it did
+        assert studio.get_attribute("#pvLog", "readonly") is not None
+        for part in ("Starting:", "Drew all", "Sending to the server", "Sent in", "Watermark applied", "Uploaded the pictures", "Done. Your link is ready."):
+            assert part in log, (part, log)
+        assert "%" in log and "[00:" in log and " so far" in log or "Drew all" in log        # percentages and times
         assert studio.locator("#tl .tl-dot.done").count() == 5                              # the timeline has moved all the way
 
         studio.click("#sClose"); studio.click("[data-menu=file]"); studio.click("#projects")

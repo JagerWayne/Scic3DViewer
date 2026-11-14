@@ -1,5 +1,5 @@
 """SQLite persistence + license/tier rules. Everything lives under SCIC_DATA (default ./data)."""
-import calendar, hashlib, os, re, secrets, sqlite3, time
+import calendar, hashlib, json, os, re, secrets, sqlite3, time
 from pathlib import Path
 
 DATA = Path(os.environ.get("SCIC_DATA", Path(__file__).parent / "data"))
@@ -57,6 +57,9 @@ def init():
           id INTEGER PRIMARY KEY, ts INTEGER, license_id INTEGER, action TEXT, ip TEXT, detail TEXT);
         CREATE TABLE IF NOT EXISTS rate_hits(bucket TEXT, ip TEXT, ts REAL);
         CREATE INDEX IF NOT EXISTS rate_hits_k ON rate_hits(bucket, ip, ts);
+        CREATE TABLE IF NOT EXISTS jobs(
+          id TEXT PRIMARY KEY, license_id INTEGER, created REAL, updated REAL, percent REAL DEFAULT 0,
+          log TEXT DEFAULT '[]', done INTEGER DEFAULT 0, error TEXT, result TEXT);
         CREATE TABLE IF NOT EXISTS oauth_pending(
           state TEXT PRIMARY KEY, purpose TEXT, license_id INTEGER, verifier TEXT, expires REAL);
         CREATE TABLE IF NOT EXISTS drive_projects(
@@ -65,6 +68,7 @@ def init():
         """)
         c.execute("DELETE FROM rate_hits WHERE ts<?", (time.time() - 3600,))  # counters live in SQLite so several server workers share them
         c.execute("DELETE FROM oauth_pending WHERE expires<?", (time.time(),))
+        c.execute("DELETE FROM jobs WHERE created<?", (time.time() - 86400,))
         lhave = {r[1] for r in c.execute("PRAGMA table_info(licenses)")}
         for col, typ in (("paused_at", "INTEGER"), ("note", "TEXT")):  # paused: access off, clock frozen; note: admin-only memo
             if col not in lhave:
@@ -168,6 +172,37 @@ def shares_this_month(email: str) -> int:
     with connect() as c:
         return c.execute(f"SELECT COUNT(*) FROM activity WHERE action='share' AND ts>=? AND license_id IN ({','.join('?' * len(ids))})",
                          (start, *ids)).fetchone()[0]
+
+
+def job_new(lid: int) -> str:
+    """A background job (publishing or saving) the page polls, so no single web request has to stay open for minutes."""
+    jid, now = secrets.token_urlsafe(9), time.time()
+    with connect() as c:
+        c.execute("DELETE FROM jobs WHERE created<?", (now - 86400,))
+        c.execute("INSERT INTO jobs(id,license_id,created,updated) VALUES(?,?,?,?)", (jid, lid, now, now))
+    return jid
+
+
+def job_update(jid, percent=None, line=None, key="", done=None, error=None, result=None):
+    with connect() as c:
+        r = c.execute("SELECT log, created FROM jobs WHERE id=?", (jid,)).fetchone()
+        if not r:
+            return
+        log = json.loads(r["log"])
+        if line is not None:  # a progress line with the same key replaces the previous one instead of adding a new line
+            entry = [round(time.time() - r["created"], 1), key, line]
+            if key and log and log[-1][1] == key:
+                log[-1] = entry
+            else:
+                log.append(entry)
+            log = log[-200:]
+        c.execute("UPDATE jobs SET updated=?, log=?, percent=COALESCE(?,percent), done=COALESCE(?,done), error=COALESCE(?,error), result=COALESCE(?,result) WHERE id=?",
+                  (time.time(), json.dumps(log), percent, done, error, json.dumps(result) if result is not None else None, jid))
+
+
+def job_get(jid):
+    with connect() as c:
+        return c.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
 
 
 def projects_count(email: str) -> int:

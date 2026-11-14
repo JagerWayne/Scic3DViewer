@@ -17,8 +17,11 @@ def fake_drive(monkeypatch):  # in-memory per-user "Drive"; every test user coun
     cloud.clear(); db.clear_rate_limits()  # each test starts with fresh rate-limit counters
     monkeypatch.setattr(storage, "configured", lambda: True)
     monkeypatch.setattr(storage, "connected", lambda lid: True)
-    def upload(lid, p, name):  # unique ids, like the real Drive
-        fid = f"{lid}:{name}:{next(ids)}"; cloud[fid] = p.read_bytes(); return fid
+    def upload(lid, p, name, progress=None):  # unique ids, like the real Drive
+        fid = f"{lid}:{name}:{next(ids)}"; cloud[fid] = p.read_bytes()
+        if progress:
+            progress(len(cloud[fid]) // 2, len(cloud[fid])); progress(len(cloud[fid]), len(cloud[fid]))
+        return fid
     monkeypatch.setattr(storage, "upload", upload)
     monkeypatch.setattr(storage, "stream", lambda lid, fid: iter([cloud[fid]]))
     monkeypatch.setattr(storage, "delete", lambda lid, fid: cloud.pop(fid, None))
@@ -65,6 +68,10 @@ def share_images(h, pack=None, **data):  # always with the model
                   data={"config": "{}", "kind": "images", **data})
 
 
+def job_of(h, r):
+    return c.get(f"/api/jobs/{r.json()['job']}", headers=h).json()
+
+
 def tier(h):
     return c.get("/api/me", headers=h).json()["tier"]
 
@@ -107,7 +114,11 @@ def test_drive_only_storage(monkeypatch):
     assert c.get(f"/api/projects/{sid}/images").content.startswith(b"S3IM")  # streamed back through the server
     assert c.delete(f"/api/projects/{sid}", headers=h).status_code == 200 and not cloud
     monkeypatch.setattr(storage, "upload", lambda *a: 1 / 0)           # Drive failing -> error, nothing left behind
-    assert share(h).status_code == 502 and not list(db.SHARES.glob("*"))
+    r = share(h)                                                       # the slow part runs in a background job: the request itself succeeds...
+    assert r.status_code == 200 and not list(db.SHARES.glob("*"))
+    j = job_of(h, r)
+    assert j["done"] and "Google Drive failed" in j["error"] and "Failed" in j["log"][-1][2]   # ...and the job reports what went wrong
+    assert c.get("/api/projects", headers=h).json() == []              # nothing half-published
     monkeypatch.setattr(storage, "connected", lambda lid: False)       # user has not connected Drive -> refused
     assert share(h).status_code == 409 and not list(db.SHARES.glob("*"))
 
@@ -214,7 +225,7 @@ def test_upload_releases_the_local_file(monkeypatch, tmp_path):  # Windows canno
 
     class Files:
         def create(self, body, media_body, fields): self.m = media_body; return self
-        def execute(self): self.m.getbytes(0, 4); return {"id": "x"}
+        def next_chunk(self): self.m.getbytes(0, 4); return None, {"id": "x"}
 
     class Svc:
         def files(self): return Files()
@@ -644,3 +655,44 @@ def test_saved_projects_roundtrip_and_limits(monkeypatch):
     assert c.post("/api/drive-projects", headers=h, files={"model": ("m.glb", GLB)}, data={"thumb": "javascript:1"}).status_code == 400
     assert c.get("/api/me", headers=h).json()["projects_count"] == 1
     assert not list(db.SHARES.glob("*"))                                                # nothing left on this server
+
+
+# ---------- publishing and saving run as background jobs with a readable log ----------
+def test_publishing_is_a_job_with_a_progress_log():
+    h = login("joblog@x.com")                                            # Free: watermark is applied, so that step shows up too
+    r = share(h)
+    assert r.status_code == 200 and set(r.json()) == {"job", "share_id", "url"}      # answered at once, no long request for a proxy to cut (524)
+    j = job_of(h, r)
+    text = "\n".join(line[2] for line in j["log"])
+    assert j["done"] and not j["error"] and j["percent"] == 100 and j["result"]["share_id"] == r.json()["share_id"]
+    assert "Received" in text and "Watermark applied to all pictures." in text
+    assert "Uploaded the pictures" in text and text.rstrip().endswith("Done. Your link is ready.")
+    assert [x[0] for x in j["log"]] == sorted(x[0] for x in j["log"])                  # times only go forward
+    assert c.get(f"/api/projects/{r.json()['share_id']}/config").status_code == 200   # the link is live once the job is done
+    assert c.get(f"/api/jobs/{r.json()['job']}", headers=login("snoop@x.com")).status_code == 404   # other people cannot read it
+    assert c.get(f"/api/jobs/{r.json()['job']}").status_code == 401
+    assert c.get("/api/jobs/abcdefghij", headers=h).status_code == 404
+    pro_h = pro("joblog2@x.com")
+    text = "\n".join(line[2] for line in job_of(pro_h, share(pro_h))["log"])
+    assert "Watermark" not in text and "Uploaded the pictures" in text                 # Pro: no watermark step
+
+
+def test_job_reports_model_steps_and_unreadable_pictures():
+    h = pro("joblog3@x.com")
+    text = "\n".join(line[2] for line in job_of(h, share(h, allow_download=True))["log"])
+    assert "Compressing the model" in text and "Uploaded the model" in text and "Uploaded the pictures" in text
+    cloud.clear()
+    garbage = share(login("joblog4@x.com"), pack=mkpack(thumbs=False).replace(_pic(64, "WEBP"), b"x" * len(_pic(64, "WEBP"))))   # right layout, not pictures
+    j = job_of(login("joblog4@x.com"), garbage)
+    assert j["done"] and j["error"] == "The pictures could not be read."
+    assert not list(db.SHARES.glob("*")) and not cloud                                   # nothing left on the server or in Drive
+
+
+def test_saving_a_project_is_a_job_too():
+    h = login("jobsave@x.com")
+    r = c.post("/api/drive-projects", headers=h, files={"model": ("m.glb", GLB)}, data={"config": "{}", "name": "P"})
+    assert r.status_code == 200 and set(r.json()) >= {"job", "id", "name"}
+    j = job_of(h, r)
+    text = "\n".join(line[2] for line in j["log"])
+    assert j["done"] and not j["error"] and j["result"]["id"] == r.json()["id"] and "Uploading" in text and text.rstrip().endswith("saved in your Google Drive.")
+    assert c.get("/api/drive-projects", headers=h).json()["total"] == 1

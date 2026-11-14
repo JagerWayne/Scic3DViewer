@@ -128,14 +128,21 @@ def _service(lid: int):
     return _svc[lid]
 
 
-def upload(lid: int, path: Path, name: str) -> str:
+def upload(lid: int, path: Path, name: str, progress=None) -> str:
+    """Upload one file to the user's Drive in 8 MB pieces; progress(bytes_sent, total_bytes) is called after each piece."""
     from googleapiclient.http import MediaIoBaseUpload
     for attempt in (0, 1):
         try:
             s, folder = _service(lid)
+            total = path.stat().st_size
             with open(path, "rb") as f:  # MediaFileUpload keeps the file open, and Windows then refuses to delete it
                 media = MediaIoBaseUpload(f, mimetype="application/octet-stream", resumable=True, chunksize=8 * 1024 * 1024)
-                return s.files().create(body={"name": name, "parents": [folder]}, media_body=media, fields="id").execute()["id"]
+                req, resp = s.files().create(body={"name": name, "parents": [folder]}, media_body=media, fields="id"), None
+                while resp is None:
+                    status, resp = req.next_chunk()
+                    if progress:
+                        progress(status.resumable_progress if status else total, total)
+                return resp["id"]
         except PermissionError:
             raise
         except Exception:

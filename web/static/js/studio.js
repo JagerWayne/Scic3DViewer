@@ -223,7 +223,11 @@ async function doSave(name, asNew) { // returns an error message, or null when s
     const fd = new FormData();
     fd.append('model', glb, 'model.glb'); fd.append('config', JSON.stringify(stage.getConfig())); fd.append('name', name); fd.append('thumb', snapshot());
     if (current && !asNew) fd.append('project_id', current.id);
-    const r = await call('/api/drive-projects', { method: 'POST', body: fd });
+    const r = (await runJob('/api/drive-projects', fd, {  // compressing and uploading run in the background of the server: follow them in the status bar
+      onSend: (a, b) => { $('#saveState').textContent = `Saving… sending ${Math.round(100 * a / b)}%`; },
+      onServer: j => { $('#saveState').textContent = `Saving… ${Math.round(j.percent)}%`; $('#saveState').title = j.log.at(-1)?.[2] || ''; },
+    })).result;
+    $('#saveState').title = '';
     if (!current || asNew) me.projects_count++;
     current = { id: r.id, name: r.name }; modelName = r.name; setDirty(false); updateStatus(); toast('Saved to your Google Drive');
     return null;
@@ -378,7 +382,7 @@ on('iPreset', 'change', () => {
   imgInfo();
 });
 for (const id of ['iAz', 'iEl', 'iPx', 'iQ', 'iElMin', 'iElMax']) on(id, 'input', imgInfo);
-on('iCancel', 'click', () => { cancelPack = true; });
+on('iCancel', 'click', () => { cancelPack = true; currentXhr?.abort(); });
 async function buildPack(P, onFrame) { // 'S3IM' + u32 index length + JSON index + the pictures, in one file
   const t = await stage.renderTurntable({ az: P.az, el: P.el, elMin: P.elMin, elMax: Math.max(P.elMin, P.elMax), px: P.px, quality: P.q / 100,
     cancelled: () => cancelPack, onProgress: onFrame });
@@ -408,34 +412,92 @@ async function showQr(url) { // the QR library loads from the CDN only when a li
   const img = $('#sQr');
   try { const qr = (await import('qrcode-generator')).default(0, 'M'); qr.addData(url); qr.make(); img.src = qr.createDataURL(4); img.classList.remove('hidden'); } catch { img.classList.add('hidden'); }
 }
-async function publish() { // step 5: draw the pictures (with a live preview), upload everything, then step 6 shows the link
-  const P = imgParams(), status = t => { $('#pvStatus').textContent = t; };
-  cancelPack = false; let prev = '';
-  $('#pvImg').removeAttribute('src'); $('#pvBox').style.background = BACKDROPS[stage.state.backdrop] || BACKDROPS.midnight;
-  $('#iBar').value = 0; $('#iPct').textContent = '0%'; status('Drawing the pictures…');
+// ---- the Processing step: a readable log, and the helpers that talk to the background jobs of the server ----
+const fmtT = n => (n >= 60 ? `${Math.floor(n / 60)} min ${String(Math.round(n % 60)).padStart(2, '0')} s` : `${Math.round(n)} s`);
+const clock = n => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(Math.floor(n % 60)).padStart(2, '0')}`;
+const etaOf = (done, total, t0) => { const el = (performance.now() - t0) / 1000; return `${fmtT(el)} so far` + (done > 0 && el > 1 ? `, about ${fmtT(el * (total - done) / done)} left` : ''); };
+let logT0 = 0, logLines = [], serverLines = [], currentXhr = null;
+function renderLog() {
+  const box = $('#pvLog'), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+  box.value = [...logLines, ...serverLines].map(l => l.text).join('\n'); if (stick) box.scrollTop = box.scrollHeight;
+}
+function say(text, key = '') { // a line with the same key replaces the previous one, so progress does not flood the log
+  const line = { key, text: `[${clock((performance.now() - logT0) / 1000)}] ${text}` };
+  if (key && logLines.at(-1)?.key === key) logLines[logLines.length - 1] = line; else logLines.push(line);
+  renderLog();
+}
+function setBar(pct, headline) { $('#iBar').value = pct; $('#iPct').textContent = Math.round(pct) + '%'; setFill((4 + .96 * pct / 100) / (STEPS.length - 1)); if (headline) $('#pvStatus').textContent = headline; }
+const friendly = st => (st === 413 ? 'The upload is too big for the connection to the server (about 100 MB per upload). Choose a lower quality.'
+  : st === 524 || st === 504 || st === 502 ? 'The server took too long to answer. Please try again.' : `Request failed (${st})`);
+function xhrJson(url, body, onProgress) { // XMLHttpRequest, because fetch cannot report how much of an upload has been sent
+  return new Promise((resolve, reject) => {
+    const x = currentXhr = new XMLHttpRequest(); x.open('POST', url); x.setRequestHeader('Authorization', 'Bearer ' + token);
+    x.upload.onprogress = e => e.lengthComputable && onProgress?.(e.loaded, e.total);
+    x.onload = () => {
+      let j = {}; try { j = JSON.parse(x.responseText); } catch { /* not JSON: a proxy error page */ }
+      if (x.status >= 200 && x.status < 300) resolve(j); else reject(new Error(typeof j.detail === 'string' ? j.detail : friendly(x.status)));
+    };
+    x.onerror = () => reject(new Error('The connection to the server was lost. Check your internet and try again.'));
+    x.onabort = () => reject(new Error('Cancelled'));
+    x.send(body);
+  });
+}
+async function pollJob(jid, onUpdate) { // the server works in the background; ask it how far it is, about twice a second
+  let failures = 0;
+  for (;;) {
+    await new Promise(r => setTimeout(r, 700));
+    let j; try { j = await call(`/api/jobs/${jid}`); failures = 0; } catch (e) { if (++failures >= 6) throw new Error('Lost contact with the server while it was working. Check My shared links to see whether the link was created.'); continue; }
+    onUpdate?.(j);
+    if (j.done) { if (j.error) throw new Error(j.error); return j.result; }
+    if (j.idle > 180) throw new Error('The server stopped working on this. Please try again.');
+  }
+}
+async function runJob(url, fd, { onSend, onSent, onServer } = {}) { // POST (progress while sending), then follow the job until it is done
+  const r = await xhrJson(url, fd, onSend); onSent?.(r);
+  return { ...r, result: await pollJob(r.job, onServer) };
+}
+async function publish() { // step 5: draw the pictures (with a live preview), send them, let the server finish; step 6 shows the link
+  const P = imgParams(), total = P.az * P.el; cancelPack = false; let prev = '';
+  logT0 = performance.now(); logLines = []; serverLines = []; renderLog(); show('iCancel');
+  $('#pvImg').removeAttribute('src'); $('#pvBox').style.background = BACKDROPS[stage.state.backdrop] || BACKDROPS.midnight; setBar(0, 'Starting…');
+  const mark = me.images.watermark === 'forced' ? 'a watermark and a faint cross are added' : $('#iWm').value.trim() ? 'your watermark text is added' : 'no watermark';
+  say(`Starting: ${total} pictures (${P.az} around × ${P.el} heights) at ${P.px} px; ${mark}.`);
   try {
     const fd = new FormData();
     if ($('#pDl').checked) { // the model is only stored in Drive when visitors may download it
+      say('Preparing the 3D model for download…', 'model');
       const glb = await stage.exportAs('glb');
       if (glb.size > me.max_mb * MB) throw new Error(`Model is over the ${me.max_mb} MB limit of the ${me.tier} tier`);
-      fd.append('model', glb, 'model.glb'); fd.append('allow_download', 'true');
+      fd.append('model', glb, 'model.glb'); fd.append('allow_download', 'true'); say(`Model ready: ${(glb.size / MB).toFixed(1)} MB.`, 'model');
     }
     fd.append('title', val('sTitle').trim() || modelName || 'Untitled'); fd.append('config', JSON.stringify(stage.getConfig()));
     fd.append('expires_in_days', val('sExpiry')); fd.append('password', $('#sUsePw').checked ? val('sPass') : '');
     if (editing && $('#sUpdate').checked) fd.append('update_id', editing.id);
     fd.append('kind', 'images'); fd.append('watermark', val('iWm').trim());
-    fd.append('pack', await buildPack(P, (f, blob) => {
-      $('#iBar').value = f * 100; $('#iPct').textContent = Math.round(f * 100) + '%'; setFill((4 + .9 * f) / (STEPS.length - 1)); // the timeline creeps toward step 6
+    const t0 = performance.now();
+    const pack = await buildPack(P, (f, blob) => {
+      const i = Math.round(f * total); setBar(45 * f, `Drawing picture ${i} of ${total}…`);
+      say(`Drawing pictures: ${i}/${total} (${Math.round(f * 100)}%) · ${etaOf(i, total, t0)}`, 'draw');
       const url = URL.createObjectURL(blob); $('#pvImg').src = url; if (prev) URL.revokeObjectURL(prev); prev = url;
-    }), 'pack.s3im');
-    status('Uploading to your Google Drive…'); setFill(.98);
-    const r = await call('/api/projects/share', { method: 'POST', body: fd });
-    const url = location.origin + r.url; $('#sUrl').value = url;
+    });
+    say(`Drew all ${total} pictures and their previews in ${fmtT((performance.now() - t0) / 1000)}.`, 'draw');
+    say(`Packed everything into one file: ${(pack.size / MB).toFixed(1)} MB.`, 'pack'); setBar(48, 'Packed. Sending…');
+    fd.append('pack', pack, 'pack.s3im');
+    const t1 = performance.now(); let base = 0;
+    const r = await runJob('/api/projects/share', fd, {
+      onSend: (a, b) => { setBar(50 + 8 * a / b, 'Sending to the server…'); say(`Sending to the server: ${(a / MB).toFixed(1)} / ${(b / MB).toFixed(1)} MB (${Math.round(100 * a / b)}%) · ${etaOf(a, b, t1)}`, 'send'); },
+      onSent: () => { base = (performance.now() - logT0) / 1000; show('iCancel', false); say(`Sent in ${fmtT((performance.now() - t1) / 1000)}. The server now finishes the job in the background (watermark, upload to your Google Drive).`, 'sent'); },
+      onServer: j => { // the lines the server wrote, with their times
+        serverLines = j.log.map(([t, , text]) => ({ text: `[${clock(base + t)}] ${text}` })); renderLog();
+        setBar(58 + 42 * j.percent / 100, j.log.at(-1)?.[2] || 'Working on the server…');
+      },
+    });
+    const url = location.origin + r.result.url; $('#sUrl').value = url;
     $('#sEmbed').value = `<iframe src="${url}" width="640" height="480" style="border:0" allow="fullscreen" allowfullscreen></iframe>`;
     if (!editing || !$('#sUpdate').checked) me.shares_month++;
-    updateStatus();
+    updateStatus(); setBar(100, 'Done');
     goStep(6); showQr(url);
-  } catch (e) { goStep(5, e.message === 'Cancelled' ? 'Cancelled. Go back to change the settings.' : e.message); }
+  } catch (e) { const m = e.message === 'Cancelled' ? 'Cancelled. Go back to change the settings.' : e.message; say('Failed: ' + m); goStep(5, m); }
   if (prev) URL.revokeObjectURL(prev);
 }
 

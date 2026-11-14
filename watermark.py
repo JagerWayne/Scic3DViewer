@@ -32,7 +32,7 @@ def _overlay(size, text, tile, cross):
     return img
 
 
-def bake(path: Path, text: str, tile: bool, cross: bool):
+def bake(path: Path, text: str, tile: bool, cross: bool, progress=None):
     """Rewrite the pack at `path` with the watermark drawn into all pictures and previews."""
     raw = path.read_bytes()
     n = int.from_bytes(raw[4:8], "little")
@@ -40,7 +40,7 @@ def bake(path: Path, text: str, tile: bool, cross: bool):
     data = memoryview(raw)[8 + n:]
     webp = ix["mime"] == "image/webp"
     overlays, out, new = {}, [], {}
-    off = 0
+    off, done, total = 0, 0, len(ix.get("thumbs") or []) + len(ix.get("frames") or [])
     for key, q in (("thumbs", 74), ("frames", 82)):  # previews first, so a viewer can start before the whole file has arrived
         placed = []
         for o, ln in ix.get(key) or []:
@@ -58,6 +58,9 @@ def bake(path: Path, text: str, tile: bool, cross: bool):
             placed.append([off, len(b)])
             out.append(b)
             off += len(b)
+            done += 1
+            if progress:
+                progress(done, total)
         new[key] = placed
     ix["frames"] = new["frames"]
     if ix.get("thumbs"):

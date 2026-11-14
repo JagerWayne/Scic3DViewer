@@ -1,8 +1,8 @@
-import gzip, hashlib, itertools, json, os, re, secrets, shutil, time, zlib
+import gzip, hashlib, itertools, json, logging, os, re, secrets, shutil, time, zlib
 from html import escape
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -228,8 +228,33 @@ def check_access(r, request: Request):
             raise HTTPException(401, "password")
 
 
+def _secs(n: float) -> str:
+    n = int(round(n))
+    return f"{n // 60} min {n % 60:02d} s" if n >= 60 else f"{n} s"
+
+
+def _eta(done: float, total: float, t0: float) -> str:
+    el = time.time() - t0
+    left = el * (total - done) / done if done > 0 and el > 1 else None
+    return f"{_secs(el)} so far" + (f", about {_secs(left)} left" if left is not None else "")
+
+
+class JobLog:
+    """What a background job is doing, written to the jobs table: the page polls it and shows it. Progress lines are rate limited."""
+    def __init__(self, jid):
+        self.jid, self.last = jid, 0.0
+
+    def say(self, percent, line, key=""):
+        db.job_update(self.jid, percent=percent, line=line, key=key)
+        self.last = time.time()
+
+    def tick(self, percent, line, key):
+        if time.time() - self.last >= .35:
+            self.say(percent, line, key)
+
+
 @app.post("/api/projects/share")
-async def share(request: Request, model: UploadFile | None = File(None), config: str = Form("{}"),
+async def share(request: Request, background: BackgroundTasks, model: UploadFile | None = File(None), config: str = Form("{}"),
                 title: str = Form("Untitled", max_length=120), allow_download: bool = Form(False),
                 update_id: str = Form(""), expires_in_days: int = Form(0, ge=0, le=3650),
                 password: str = Form("", max_length=64), kind: str = Form("images"), watermark: str = Form("", max_length=40),
@@ -275,12 +300,6 @@ async def share(request: Request, model: UploadFile | None = File(None), config:
     packfile, dest, size = db.SHARES / f"{sid}.pack", db.SHARES / f"{sid}.glb", 0
     try:
         await _save_pack(pack, packfile, im)
-        if wm:  # drawn into every picture: nobody can fetch clean pictures from the link
-            try:
-                await run_in_threadpool(wmark.bake, packfile, wm["text"], wm["tile"], wm["cross"])
-            except Exception:
-                raise HTTPException(400, "The pictures could not be read")
-            wm["baked"] = True
         if has_model:
             with open(dest, "wb") as f:
                 while chunk := await model.read(db.MB):
@@ -292,40 +311,71 @@ async def share(request: Request, model: UploadFile | None = File(None), config:
         dest.unlink(missing_ok=True)
         packfile.unlink(missing_ok=True)
         raise
-    drive = {}  # data/shares is only a short-lived staging area: files move to Drive and the local copy is removed
+    a = dict(lid=lid, sid=sid, title=title, cfg=cfg, allow_download=allow_download, kind=kind, wm=wm, has_model=has_model, size=size, ip=request.client.host,
+             exp=int(time.time() + expires_in_days * 86400) if expires_in_days else None, pw=db.hash_pw(password) if password else None,
+             fmts=json.dumps((["glb"] if "glb" in tier["formats"] else []) if allow_download else []),  # only the original GLB can be offered
+             old=dict(old) if old else None)
+    jid = db.job_new(lid)  # the slow part (watermark, Google Drive) runs in the background: one web request must never stay open for minutes (proxies cut it with a 524)
+    db.job_update(jid, percent=1, key="recv", line=f"Received {packfile.stat().st_size / db.MB:.1f} MB of pictures" + (f" and the {size / db.MB:.1f} MB model." if has_model else "."))
+    background.add_task(_finish_share, jid, a)
+    return {"job": jid, "share_id": sid, "url": f"/v/{sid}"}
+
+
+def _finish_share(jid: str, a: dict):
+    j, lid, sid, wm = JobLog(jid), a["lid"], a["sid"], a["wm"]
+    packfile, dest, gz = db.SHARES / f"{sid}.pack", db.SHARES / f"{sid}.glb", db.SHARES / f"{sid}.glb.gz"
+    drive, stage = {}, "check"
     try:
-        if has_model:
-            await run_in_threadpool(_gzip, dest, db.SHARES / f"{sid}.glb.gz")
-        for key, fname in (("glbz", f"{sid}.glb.gz"), ("pack", f"{sid}.pack")):
-            p = db.SHARES / fname
-            if p.exists():
-                drive[key] = await run_in_threadpool(storage.upload, lid, p, fname)
+        if wm:  # drawn into every picture: nobody can fetch clean pictures from the link
+            stage, t0 = "wm", time.time()
+            j.say(3, "Applying the watermark to every picture, so nobody can download clean ones…", "wm")
+            wmark.bake(packfile, wm["text"], wm["tile"], wm["cross"], progress=lambda i, n: j.tick(3 + 30 * i / n, f"Watermark: {i}/{n} pictures ({100 * i // n}%) · {_eta(i, n, t0)}", "wm"))
+            wm["baked"] = True
+            j.say(33, "Watermark applied to all pictures.", "wm")
+        if a["has_model"]:
+            stage = "gz"
+            j.say(34, "Compressing the model for your Google Drive…", "gz")
+            _gzip(dest, gz)
+        stage = "up"
+        files = [(k, f) for k, f in (("glbz", gz), ("pack", packfile)) if f.exists()]
+        total, sent = sum(f.stat().st_size for _, f in files) or 1, 0
+        for key, f in files:
+            fsize, t0 = f.stat().st_size, time.time()
+            label = "the model" if key == "glbz" else "the pictures"
+            j.say(36 + 60 * sent / total, f"Uploading {label} to your Google Drive ({fsize / db.MB:.1f} MB)…", "up-" + key)
+            drive[key] = storage.upload(lid, f, f.name, progress=lambda x, y, base=sent, t0=t0, label=label: j.tick(
+                36 + 60 * (base + x) / total, f"Uploading {label}: {x / db.MB:.1f} / {y / db.MB:.1f} MB ({100 * x // max(y, 1)}%) · {_eta(x, y, t0)}", "up-" + key))
+            sent += fsize
+            j.say(36 + 60 * sent / total, f"Uploaded {label} ({fsize / db.MB:.1f} MB in {_secs(time.time() - t0)}).", "up-" + key)
+        stage = "db"
+        j.say(97, "Saving your link…", "db")
+        old = a["old"]
+        vals = (a["title"], json.dumps(a["cfg"]), int(a["allow_download"]), 0, 0, a["fmts"], json.dumps(drive), a["exp"], a["pw"], a["kind"], json.dumps(wm) if wm else None)
+        with db.connect() as c:
+            if old:
+                c.execute("UPDATE shares SET title=?,config=?,allow_download=?,allow_measure=?,allow_explode=?,formats=?,"
+                          "drive_ids=?,expires_at=?,pw_hash=?,kind=?,wm=?,revoked=0 WHERE share_id=?", (*vals, sid))
+            else:
+                c.execute("INSERT INTO shares(title,config,allow_download,allow_measure,allow_explode,formats,drive_ids,"
+                          "expires_at,pw_hash,kind,wm,share_id,license_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (*vals, sid, lid, int(time.time())))
+        if old:  # the previous files are only removed once the new ones are safely stored
+            for fid in json.loads(old["drive_ids"] or "{}").values():
+                storage.delete(old["license_id"], fid)
+        db.log(lid, "update" if old else "share", a["ip"], f"{sid} {a['size']}B")
+        db.job_update(jid, percent=100, key="done", line="Done. Your link is ready.", done=1, result={"share_id": sid, "url": f"/v/{sid}"})
     except Exception as e:
+        logging.getLogger("uvicorn.error").exception("publishing %s failed in step %s", sid, stage)
         for fid in drive.values():
             storage.delete(lid, fid)
-        if isinstance(e, PermissionError):
-            raise HTTPException(409, "Connect your Google Drive first (Drive button in the top bar).")
-        raise HTTPException(502, "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive.")
+        msg = ("Connect your Google Drive first (Drive menu)." if isinstance(e, PermissionError)
+               else "The pictures could not be read." if stage == "wm"
+               else "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive." if stage == "up"
+               else "Could not save the link, please try again.")
+        db.job_update(jid, key="fail", line="Failed: " + msg, done=1, error=msg)
     finally:
         for ext in ("glb", "glb.gz", "pack"):
             (db.SHARES / f"{sid}.{ext}").unlink(missing_ok=True)
-    exp = int(time.time() + expires_in_days * 86400) if expires_in_days else None
-    pw = db.hash_pw(password) if password else None
-    fmts = json.dumps((["glb"] if "glb" in tier["formats"] else []) if allow_download else [])  # only the original GLB can be offered
-    vals = (title, json.dumps(cfg), int(allow_download), 0, 0, fmts, json.dumps(drive), exp, pw, kind, json.dumps(wm) if wm else None)
-    with db.connect() as c:
-        if old:
-            c.execute("UPDATE shares SET title=?,config=?,allow_download=?,allow_measure=?,allow_explode=?,formats=?,"
-                      "drive_ids=?,expires_at=?,pw_hash=?,kind=?,wm=?,revoked=0 WHERE share_id=?", (*vals, sid))
-        else:
-            c.execute("INSERT INTO shares(title,config,allow_download,allow_measure,allow_explode,formats,drive_ids,"
-                      "expires_at,pw_hash,kind,wm,share_id,license_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (*vals, sid, lid, int(time.time())))
-    if old:  # the previous files are only removed once the new ones are safely stored
-        for fid in json.loads(old["drive_ids"] or "{}").values():
-            storage.delete(old["license_id"], fid)
-    db.log(lid, "update" if old else "share", request.client.host, f"{sid} {size}B")
-    return {"share_id": sid, "url": f"/v/{sid}"}
 
 
 class Patch(BaseModel):
@@ -473,7 +523,7 @@ def owned_project(pid: str, u):
 
 
 @app.post("/api/drive-projects")
-async def save_project(request: Request, model: UploadFile = File(...), config: str = Form("{}"), name: str = Form("Untitled", max_length=80),
+async def save_project(request: Request, background: BackgroundTasks, model: UploadFile = File(...), config: str = Form("{}"), name: str = Form("Untitled", max_length=80),
                        thumb: str = Form("", max_length=60000), project_id: str = Form(""), u=Depends(current_user)):
     rate_limit(request, "save", 30)
     lid = u["license_id"]
@@ -495,7 +545,7 @@ async def save_project(request: Request, model: UploadFile = File(...), config: 
         raise HTTPException(400, "Model must be a binary .glb")
     await model.seek(0)
     pid = old["id"] if old else secrets.token_urlsafe(9)
-    dest, zdest, size = db.SHARES / f"p{pid}.glb", db.SHARES / f"p{pid}.glb.gz", 0
+    dest, size = db.SHARES / f"p{pid}.glb", 0
     try:
         with open(dest, "wb") as f:
             while chunk := await model.read(db.MB):
@@ -503,29 +553,59 @@ async def save_project(request: Request, model: UploadFile = File(...), config: 
                 if size > tier["max_mb"] * db.MB:
                     raise HTTPException(413, f"{u['tier']} tier limit is {tier['max_mb']} MB")
                 f.write(chunk)
-        await run_in_threadpool(_gzip, dest, zdest)
-        fid = await run_in_threadpool(storage.upload, lid, zdest, f"{pid}.glb.gz")
-    except HTTPException:
+    except BaseException:
+        dest.unlink(missing_ok=True)
         raise
-    except PermissionError:
-        raise HTTPException(409, "Connect your Google Drive first (Drive menu).")
-    except Exception:
-        raise HTTPException(502, "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive.")
+    name = name.strip() or "Untitled"
+    jid = db.job_new(lid)  # compressing and uploading to Drive can take minutes: it runs in the background (see publishing)
+    db.job_update(jid, percent=1, key="recv", line=f"Received the {size / db.MB:.1f} MB model.")
+    background.add_task(_finish_save, jid, dict(lid=lid, pid=pid, name=name, config=config, thumb=thumb, size=size, old=dict(old) if old else None, ip=request.client.host))
+    return {"job": jid, "id": pid, "name": name}
+
+
+def _finish_save(jid: str, a: dict):
+    j, lid, pid = JobLog(jid), a["lid"], a["pid"]
+    dest, zdest = db.SHARES / f"p{pid}.glb", db.SHARES / f"p{pid}.glb.gz"
+    stage = "gz"
+    try:
+        j.say(5, "Compressing the model for your Google Drive…", "gz")
+        _gzip(dest, zdest)
+        stage, t0 = "up", time.time()
+        total = zdest.stat().st_size
+        j.say(15, f"Uploading to your Google Drive ({total / db.MB:.1f} MB)…", "up")
+        fid = storage.upload(lid, zdest, f"{pid}.glb.gz", progress=lambda x, y: j.tick(15 + 80 * x / max(y, 1), f"Uploading: {x / db.MB:.1f} / {y / db.MB:.1f} MB ({100 * x // max(y, 1)}%) · {_eta(x, y, t0)}", "up"))
+        stage, now, old = "db", int(time.time()), a["old"]
+        j.say(97, "Saving the project…", "db")
+        with db.connect() as c:
+            if old:
+                c.execute("UPDATE drive_projects SET license_id=?,name=?,config=?,drive_id=?,size=?,thumb=?,updated_at=? WHERE id=?",
+                          (lid, a["name"], a["config"], fid, a["size"], a["thumb"], now, pid))
+            else:
+                c.execute("INSERT INTO drive_projects(id,license_id,name,config,drive_id,size,thumb,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                          (pid, lid, a["name"], a["config"], fid, a["size"], a["thumb"], now, now))
+        if old:
+            storage.delete(old["license_id"], old["drive_id"])
+        db.log(lid, "project_save", a["ip"], f"{pid} {a['size']}B")
+        db.job_update(jid, percent=100, key="done", line="Done. The project is saved in your Google Drive.", done=1, result={"id": pid, "name": a["name"], "updated_at": now})
+    except Exception as e:
+        logging.getLogger("uvicorn.error").exception("saving project %s failed in step %s", pid, stage)
+        msg = ("Connect your Google Drive first (Drive menu)." if isinstance(e, PermissionError)
+               else "Upload to your Google Drive failed. Check your connection and free space, or reconnect Drive." if stage == "up"
+               else "Could not save the project, please try again.")
+        db.job_update(jid, key="fail", line="Failed: " + msg, done=1, error=msg)
     finally:
         dest.unlink(missing_ok=True)
         zdest.unlink(missing_ok=True)
-    now, name = int(time.time()), name.strip() or "Untitled"
-    with db.connect() as c:
-        if old:
-            c.execute("UPDATE drive_projects SET license_id=?,name=?,config=?,drive_id=?,size=?,thumb=?,updated_at=? WHERE id=?",
-                      (lid, name, config, fid, size, thumb, now, pid))
-        else:
-            c.execute("INSERT INTO drive_projects(id,license_id,name,config,drive_id,size,thumb,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                      (pid, lid, name, config, fid, size, thumb, now, now))
-    if old:
-        storage.delete(old["license_id"], old["drive_id"])
-    db.log(lid, "project_save", request.client.host, f"{pid} {size}B")
-    return {"id": pid, "name": name, "updated_at": now}
+
+
+@app.get("/api/jobs/{jid}")
+def job_status(jid: str, request: Request, u=Depends(current_user)):
+    rate_limit(request, "job", 400)  # the page polls about twice a second
+    j = db.job_get(jid) if ID_RE.match(jid) else None
+    if not j or j["license_id"] not in db.license_ids(u["email"]):
+        raise HTTPException(404, "Job not found")
+    return {"percent": j["percent"], "log": json.loads(j["log"]), "done": bool(j["done"]), "error": j["error"],
+            "result": json.loads(j["result"]) if j["result"] else None, "idle": round(time.time() - j["updated"])}
 
 
 @app.get("/api/drive-projects")
